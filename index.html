@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moti DD ERP</title>
+  <link rel="icon" href="img/logo-small.jpg">
+  <meta name="theme-color" content="#3a68a3">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main style="max-width:420px">
+    <div class="card">
+      <img class="login-logo" src="img/logo.jpg" alt="Moti Engineering">
+      <h1 class="login-title" data-t="appName"></h1>
+      <label for="username" data-t="username"></label>
+      <input id="username" autocomplete="username" autocapitalize="none">
+      <label for="password" data-t="password"></label>
+      <input id="password" type="password" autocomplete="current-password">
+      <p><button id="loginBtn" data-t="login"></button></p>
+      <p><a href="#" id="forgotLink" data-t="forgot"></a></p>
+      <select id="langSel"><option value="en">English</option><option value="am">አማርኛ</option></select>
+      <div id="msg" class="msg"></div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    translatePage();
+    const $ = id => document.getElementById(id);
+    const show = (text, ok) => { $("msg").textContent = text; $("msg").className = "msg" + (ok ? " ok" : ""); };
+
+    $("langSel").value = getLang();
+    $("langSel").onchange = () => setLang($("langSel").value);
+
+    // Already logged in? Go straight to the app.
+    db.auth.getSession().then(({ data }) => { if (data.session) location.href = "shipments.html"; });
+
+    $("loginBtn").onclick = async () => {
+      show("");
+      const { error } = await db.auth.signInWithPassword({ email: toEmail($("username").value), password: $("password").value });
+      if (error) return show(t("wrongLogin"));
+      location.href = "shipments.html";
+    };
+
+    // "Forgot password" only sends a request; the manager approves it and sets a new password.
+    $("forgotLink").onclick = async (e) => {
+      e.preventDefault();
+      const username = $("username").value.trim().toLowerCase();
+      if (!username) return show(t("enterUsername"));
+      const { error } = await db.from("password_requests").insert({ username });
+      show(error ? t("error") : t("requestSent"), !error);
+    };
+  </script>
+</body>
+</html>

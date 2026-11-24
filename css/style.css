@@ -1,0 +1,38 @@
+/* Simple mobile-first styles. Brand colours come from the Moti logo; change them here only. */
+:root {
+  --brand: #5081bc;      /* logo blue */
+  --main: #3a68a3;       /* buttons / links (darker logo blue, readable with white text) */
+  --dark: #1f3a5f;       /* headings */
+  --bg: #f2f6fb;
+  --text: #1b1f24;
+  --muted: #6b7686;
+  --line: #d6e0ee;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, "Noto Sans Ethiopic", sans-serif; background: var(--bg); color: var(--text); }
+main { max-width: 900px; margin: 0 auto; padding: 16px; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(31, 58, 95, .06); }
+h1, h2 { margin-top: 0; color: var(--dark); }
+a { color: var(--main); }
+label { display: block; margin: 10px 0 4px; font-weight: 600; color: var(--dark); }
+input, select { width: 100%; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+input:focus, select:focus { outline: 2px solid var(--brand); border-color: var(--brand); }
+button { padding: 10px 16px; font-size: 16px; border: 0; border-radius: 8px; background: var(--main); color: #fff; cursor: pointer; }
+button:hover { background: var(--dark); }
+button.secondary { background: #e4ecf7; color: var(--dark); }
+button.secondary:hover { background: #d3e0f2; }
+.bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 16px; background: #fff; border-bottom: 3px solid var(--brand); }
+.bar img { height: 40px; width: auto; }
+.bar b { flex: 1; color: var(--dark); }
+.bar select { width: auto; }
+nav { display: flex; gap: 4px; padding: 0 16px; background: #fff; border-bottom: 1px solid var(--line); overflow-x: auto; }
+nav a { padding: 10px 12px; text-decoration: none; color: var(--muted); }
+nav a.active { border-bottom: 3px solid var(--main); font-weight: 700; color: var(--dark); }
+.login-logo { display: block; width: 150px; height: auto; margin: 0 auto 8px; }
+.login-title { text-align: center; font-size: 1.2rem; }
+.msg { margin-top: 12px; color: #b3261e; }
+.msg.ok { color: #1b7a3a; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { background: #eaf1fa; color: var(--dark); }
+th, td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
