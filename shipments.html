@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shipments - Moti DD ERP</title>
+  <link rel="icon" href="img/logo-small.jpg">
+  <meta name="theme-color" content="#3a68a3">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="header"></header>
+  <main>
+    <div id="alert"></div>
+
+    <div class="card">
+      <h2 id="formTitle"></h2>
+      <div class="grid" id="fields"></div>
+      <p>
+        <button id="saveBtn"></button>
+        <button id="cancelBtn" class="secondary" hidden></button>
+      </p>
+      <div id="msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-t="shipments"></h2>
+      <p id="totals"></p>
+      <div class="table-wrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    // [column name, label key, input type, required?]
+    const FIELDS = [
+      ["receiver_name", "receiver", "text", true], ["voucher_no", "voucher", "text"], ["plate_no", "plate", "text"],
+      ["from_place", "from", "text", true], ["to_place", "to", "text", true], ["item_type", "itemType", "text", true],
+      ["quantity", "quantity", "number"], ["amount", "amount", "number"],
+    ];
+    let ME, rows = [], editingId = null;
+
+    const msg = (text, ok) => { $("msg").textContent = text || ""; $("msg").className = "msg" + (ok ? " ok" : ""); };
+    const fmt = n => Number(n).toLocaleString();
+
+    (async () => {
+      const auth = await requireLogin();
+      if (!auth) return;
+      ME = auth.profile;
+      renderHeader(ME);
+      $("fields").innerHTML = FIELDS.map(([k, l, type]) =>
+        `<div><label for="f_${k}">${t(l)}</label><input id="f_${k}" type="${type}" ${type === "number" ? 'min="0" step="any" inputmode="decimal"' : ""}></div>`).join("");
+      resetForm();
+      translatePage();
+      load();
+    })();
+
+    function resetForm() {
+      editingId = null;
+      FIELDS.forEach(([k]) => ($("f_" + k).value = ""));
+      $("formTitle").textContent = t("newShipment");
+      $("saveBtn").textContent = t("save");
+      $("cancelBtn").textContent = t("cancel");
+      $("cancelBtn").hidden = true;
+    }
+
+    async function load() {
+      const { data, error } = await db.from("shipments").select("*, profiles(full_name)").order("serial_no", { ascending: false });
+      if (error) return msg(t("error") + " " + error.message);
+      rows = data;
+      render();
+    }
+
+    function render() {
+      const mgr = ME.role === "manager";
+      $("totals").textContent = t("total") + ": " + fmt(rows.reduce((s, r) => s + Number(r.amount), 0)) + " birr";
+
+      // Manager: show the 4500 report banner
+      if (mgr) {
+        const open = rows.filter(r => !r.reported).reduce((s, r) => s + Number(r.amount), 0);
+        $("alert").innerHTML = open >= CONFIG.REPORT_THRESHOLD
+          ? `<div class="alert"><b>${t("reportDue", { n: fmt(open), limit: fmt(CONFIG.REPORT_THRESHOLD) })}</b> <button id="markReported">${t("markReported")}</button></div>`
+          : `<div class="note">${t("unreportedTotal")}: ${fmt(open)} / ${fmt(CONFIG.REPORT_THRESHOLD)}</div>`;
+        const b = $("markReported");
+        if (b) b.onclick = async () => { await db.from("shipments").update({ reported: true }).eq("reported", false); load(); };
+      }
+
+      const cols = ["#", "dateTime"].concat(mgr ? ["engineer"] : [], ["from", "to", "itemType", "quantity", "amount", "plate", "voucher", "receiver", "status", "actions"]);
+      $("thead").innerHTML = "<tr>" + cols.map(c => `<th>${c === "#" ? "#" : t(c)}</th>`).join("") + "</tr>";
+
+      $("tbody").innerHTML = rows.length ? rows.map(r => {
+        const buttons = [];
+        if (r.status === "sent" && (r.engineer_id === ME.id || mgr)) buttons.push(`<button data-act="recv" data-id="${r.id}">${t("markReceived")}</button>`);
+        if (mgr) buttons.push(`<button class="secondary" data-act="edit" data-id="${r.id}">${t("edit")}</button>`, `<button class="secondary" data-act="del" data-id="${r.id}">${t("del")}</button>`);
+        return `<tr>
+          <td>${r.serial_no}</td><td>${esc(new Date(r.sent_at).toLocaleString(getLang() === "am" ? "am-ET" : "en-GB"))}</td>
+          ${mgr ? `<td>${esc(r.profiles?.full_name)}</td>` : ""}
+          <td>${esc(r.from_place)}</td><td>${esc(r.to_place)}</td><td>${esc(r.item_type)}</td><td>${r.quantity}</td>
+          <td>${fmt(r.amount)}</td><td>${esc(r.plate_no)}</td><td>${esc(r.voucher_no)}</td><td>${esc(r.receiver_name)}</td>
+          <td><span class="badge ${r.status}">${t(r.status)}</span></td><td>${buttons.join("")}</td></tr>`;
+      }).join("") : `<tr><td colspan="${cols.length}">${t("noData")}</td></tr>`;
+    }
+
+    // Save (new or edited)
+    $("saveBtn").onclick = async () => {
+      msg("");
+      const v = {};
+      for (const [k, , type, req] of FIELDS) {
+        const val = $("f_" + k).value.trim();
+        if (req && !val) return msg(t("fillRequired"));
+        v[k] = type === "number" ? Number(val || 0) : (val || null);
+      }
+      if (v.quantity < 1) v.quantity = 1;
+      const { error } = editingId
+        ? await db.from("shipments").update(v).eq("id", editingId)
+        : await db.from("shipments").insert({ ...v, engineer_id: ME.id });
+      if (error) return msg(t("error") + " " + error.message);
+      resetForm(); msg(t("saved"), true); load();
+    };
+    $("cancelBtn").onclick = resetForm;
+
+    // Row buttons: received / edit / delete
+    $("tbody").onclick = async (e) => {
+      const b = e.target.closest("button[data-act]");
+      if (!b) return;
+      const id = b.dataset.id, row = rows.find(r => r.id === id);
+      if (b.dataset.act === "recv") {
+        await db.rpc("confirm_received", { p_id: id });
+        load();
+      } else if (b.dataset.act === "edit") {
+        editingId = id;
+        FIELDS.forEach(([k]) => ($("f_" + k).value = row[k] ?? ""));
+        $("formTitle").textContent = t("editShipment");
+        $("saveBtn").textContent = t("update");
+        $("cancelBtn").hidden = false;
+        window.scrollTo(0, 0);
+      } else if (b.dataset.act === "del" && confirm(t("confirmDelete"))) {
+        await db.from("shipments").delete().eq("id", id);
+        load();
+      }
+    };
+  </script>
+</body>
+</html>

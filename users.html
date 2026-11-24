@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Users - Moti DD ERP</title>
+  <link rel="icon" href="img/logo-small.jpg">
+  <meta name="theme-color" content="#3a68a3">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="header"></header>
+  <main>
+    <div class="card">
+      <h2 data-t="createUser"></h2>
+      <div class="grid">
+        <div><label for="u_username" data-t="username"></label><input id="u_username" autocapitalize="none"></div>
+        <div><label for="u_name" data-t="fullName"></label><input id="u_name"></div>
+        <div><label for="u_pass" data-t="tempPassword"></label><input id="u_pass" type="password" autocomplete="new-password"></div>
+        <div><label for="u_role" data-t="role"></label>
+          <select id="u_role"><option value="engineer"></option><option value="manager"></option></select></div>
+      </div>
+      <p><button id="createBtn" data-t="createUser"></button></p>
+      <div id="msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-t="passwordRequests"></h2>
+      <div id="requests"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-t="users"></h2>
+      <div class="table-wrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    let ME, people = [], requests = [];
+    const msg = (text, ok) => { $("msg").textContent = text || ""; $("msg").className = "msg" + (ok ? " ok" : ""); };
+
+    (async () => {
+      const auth = await requireLogin(true); // managers only
+      if (!auth) return;
+      ME = auth.profile;
+      renderHeader(ME);
+      const opts = $("u_role").options;
+      opts[0].textContent = t("engineer"); opts[1].textContent = t("manager");
+      translatePage();
+      load();
+    })();
+
+    // Calls our small server function (needed because creating users requires a secret key)
+    async function api(body) {
+      const { data: { session } } = await db.auth.getSession();
+      const res = await fetch("/api/manage-users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
+        body: JSON.stringify(body),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || t("error"));
+      return out;
+    }
+
+    async function load() {
+      const p = await db.from("profiles").select("*").order("created_at");
+      const r = await db.from("password_requests").select("*").eq("status", "pending").order("created_at");
+      people = p.data || []; requests = r.data || [];
+      render();
+    }
+
+    function render() {
+      $("thead").innerHTML = "<tr>" + ["username", "fullName", "role", "active", "actions"].map(c => `<th>${t(c)}</th>`).join("") + "</tr>";
+      $("tbody").innerHTML = people.map(u => `<tr>
+        <td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${t(u.role)}</td><td>${u.active ? t("yes") : t("no")}</td>
+        <td><button data-act="pw" data-u="${esc(u.username)}">${t("setPassword")}</button>
+        ${u.id !== ME.id ? `<button class="secondary" data-act="toggle" data-id="${u.id}">${u.active ? t("deactivate") : t("activate")}</button>` : ""}</td></tr>`).join("");
+
+      $("requests").innerHTML = requests.length ? `<table><tbody>${requests.map(q => `<tr>
+        <td>${esc(q.username)}</td><td>${esc(new Date(q.created_at).toLocaleString())}</td>
+        <td><button data-act="approve" data-id="${q.id}" data-u="${esc(q.username)}">${t("setPassword")}</button>
+        <button class="secondary" data-act="reject" data-id="${q.id}">${t("reject")}</button></td></tr>`).join("")}</tbody></table>` : `<p>${t("noRequests")}</p>`;
+    }
+
+    $("createBtn").onclick = async () => {
+      msg("");
+      try {
+        await api({ action: "create", username: $("u_username").value.trim().toLowerCase(), full_name: $("u_name").value.trim(), password: $("u_pass").value, role: $("u_role").value });
+        ["u_username", "u_name", "u_pass"].forEach(i => ($(i).value = ""));
+        msg(t("userCreated"), true); load();
+      } catch (e) { msg(e.message); }
+    };
+
+    document.body.onclick = async (e) => {
+      const b = e.target.closest("button[data-act]");
+      if (!b) return;
+      const act = b.dataset.act;
+      try {
+        if (act === "toggle") {
+          const u = people.find(p => p.id === b.dataset.id);
+          await db.from("profiles").update({ active: !u.active }).eq("id", u.id);
+        } else if (act === "pw" || act === "approve") {
+          const pw = prompt(t("newPasswordPrompt"));
+          if (!pw) return;
+          await api({ action: "setpassword", username: b.dataset.u, password: pw });
+          if (act === "approve") await db.from("password_requests").update({ status: "approved" }).eq("id", b.dataset.id);
+          alert(t("done"));
+        } else if (act === "reject") {
+          await db.from("password_requests").update({ status: "rejected" }).eq("id", b.dataset.id);
+        }
+        load();
+      } catch (err) { alert(err.message); }
+    };
+  </script>
+</body>
+</html>

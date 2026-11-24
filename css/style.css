@@ -36,3 +36,12 @@ nav a.active { border-bottom: 3px solid var(--main); font-weight: 700; color: va
 table { width: 100%; border-collapse: collapse; }
 th { background: #eaf1fa; color: var(--dark); }
 th, td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+
+/* Forms and status */
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 12px; }
+.alert { background: #fdecea; border: 1px solid #f5c2c0; padding: 12px; border-radius: 10px; margin-bottom: 16px; }
+.note { background: #eaf1fa; border: 1px solid var(--line); padding: 10px 12px; border-radius: 10px; margin-bottom: 16px; color: var(--dark); }
+.badge { padding: 2px 8px; border-radius: 10px; font-size: .85rem; }
+.badge.sent { background: #fff3cd; }
+.badge.received { background: #d9f2e3; }
+td button { padding: 4px 10px; font-size: 14px; margin-right: 4px; }
