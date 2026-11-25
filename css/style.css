@@ -15,8 +15,8 @@ main { max-width: 900px; margin: 0 auto; padding: 16px; }
 h1, h2 { margin-top: 0; color: var(--dark); }
 a { color: var(--main); }
 label { display: block; margin: 10px 0 4px; font-weight: 600; color: var(--dark); }
-input, select { width: 100%; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-input:focus, select:focus { outline: 2px solid var(--brand); border-color: var(--brand); }
+input, select, textarea { width: 100%; padding: 10px; font-size: 16px; font-family: inherit; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand); border-color: var(--brand); }
 button { padding: 10px 16px; font-size: 16px; border: 0; border-radius: 8px; background: var(--main); color: #fff; cursor: pointer; }
 button:hover { background: var(--dark); }
 button.secondary { background: #e4ecf7; color: var(--dark); }
@@ -40,8 +40,22 @@ th, td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; w
 /* Forms and status */
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 12px; }
 .alert { background: #fdecea; border: 1px solid #f5c2c0; padding: 12px; border-radius: 10px; margin-bottom: 16px; }
-.note { background: #eaf1fa; border: 1px solid var(--line); padding: 10px 12px; border-radius: 10px; margin-bottom: 16px; color: var(--dark); }
-.badge { padding: 2px 8px; border-radius: 10px; font-size: .85rem; }
-.badge.sent { background: #fff3cd; }
-.badge.received { background: #d9f2e3; }
+.note { background: #eaf1fa; border: 1px solid var(--line); padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; color: var(--dark); }
+.badge { padding: 2px 8px; border-radius: 10px; font-size: .85rem; background: #eee; }
+.badge.sent, .badge.late, .badge.pending { background: #fff3cd; }
+.badge.received, .badge.ready, .badge.approved { background: #d9f2e3; }
+.badge.absent, .badge.rejected { background: #fdecea; }
+.badge.leave { background: #e4ecf7; }
+.badge.field { background: #e8def8; }
+.badge.dayoff { background: #eee; }
 td button { padding: 4px 10px; font-size: 14px; margin-right: 4px; }
+
+/* Attendance + notifications */
+.muted { color: var(--muted); font-size: .9rem; }
+.big button { padding: 14px 20px; font-size: 18px; margin: 0 8px 8px 0; }
+#bellBtn { padding: 6px 10px; }
+.panel { background: #fff; border-bottom: 1px solid var(--line); max-height: 50vh; overflow-y: auto; }
+.note-item { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.note-item.unread { background: #eaf1fa; font-weight: 600; }
+.note-item small { display: block; color: var(--muted); font-weight: 400; }
+[hidden] { display: none !important; }

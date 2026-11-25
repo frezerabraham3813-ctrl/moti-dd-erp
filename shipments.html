@@ -36,13 +36,13 @@
   <script src="js/common.js"></script>
   <script>
     const $ = id => document.getElementById(id);
-    // [column name, label key, input type, required?]
+    // [column name, label key, input type, required?]  (the receiving engineer is a separate drop-down)
     const FIELDS = [
-      ["receiver_name", "receiver", "text", true], ["voucher_no", "voucher", "text"], ["plate_no", "plate", "text"],
+      ["voucher_no", "voucher", "text"], ["plate_no", "plate", "text"],
       ["from_place", "from", "text", true], ["to_place", "to", "text", true], ["item_type", "itemType", "text", true],
       ["quantity", "quantity", "number"], ["amount", "amount", "number"],
     ];
-    let ME, rows = [], editingId = null;
+    let ME, rows = [], engineers = [], editingId = null;
 
     const msg = (text, ok) => { $("msg").textContent = text || ""; $("msg").className = "msg" + (ok ? " ok" : ""); };
     const fmt = n => Number(n).toLocaleString();
@@ -52,7 +52,11 @@
       if (!auth) return;
       ME = auth.profile;
       renderHeader(ME);
-      $("fields").innerHTML = FIELDS.map(([k, l, type]) =>
+      const { data: eng } = await db.rpc("list_engineers");
+      engineers = (eng || []).filter(e => e.id !== ME.id);
+      const receiverBox = `<div><label for="f_receiver_id">${t("receiverEng")}</label><select id="f_receiver_id">
+        <option value="">${t("selectOne")}</option>${engineers.map(e => `<option value="${e.id}">${esc(e.full_name)}</option>`).join("")}</select></div>`;
+      $("fields").innerHTML = receiverBox + FIELDS.map(([k, l, type]) =>
         `<div><label for="f_${k}">${t(l)}</label><input id="f_${k}" type="${type}" ${type === "number" ? 'min="0" step="any" inputmode="decimal"' : ""}></div>`).join("");
       resetForm();
       translatePage();
@@ -61,6 +65,7 @@
 
     function resetForm() {
       editingId = null;
+      $("f_receiver_id").value = "";
       FIELDS.forEach(([k]) => ($("f_" + k).value = ""));
       $("formTitle").textContent = t("newShipment");
       $("saveBtn").textContent = t("save");
@@ -73,6 +78,12 @@
       if (error) return msg(t("error") + " " + error.message);
       rows = data;
       render();
+    }
+
+    // Sender sees "Sent"; receiver and manager see "Pending" until the receiver confirms
+    function statusLabel(r) {
+      if (r.status === "received") return t("received");
+      return r.engineer_id === ME.id ? t("sent") : t("pending");
     }
 
     function render() {
@@ -94,14 +105,16 @@
 
       $("tbody").innerHTML = rows.length ? rows.map(r => {
         const buttons = [];
-        if (r.status === "sent" && (r.engineer_id === ME.id || mgr)) buttons.push(`<button data-act="recv" data-id="${r.id}">${t("markReceived")}</button>`);
+        // "I received it": the receiving engineer (old records without a receiver: the sender), or the manager
+        const canReceive = r.status === "sent" && (mgr || r.receiver_id === ME.id || (!r.receiver_id && r.engineer_id === ME.id));
+        if (canReceive) buttons.push(`<button data-act="recv" data-id="${r.id}">${t("markReceived")}</button>`);
         if (mgr) buttons.push(`<button class="secondary" data-act="edit" data-id="${r.id}">${t("edit")}</button>`, `<button class="secondary" data-act="del" data-id="${r.id}">${t("del")}</button>`);
         return `<tr>
           <td>${r.serial_no}</td><td>${esc(new Date(r.sent_at).toLocaleString(getLang() === "am" ? "am-ET" : "en-GB"))}</td>
           ${mgr ? `<td>${esc(r.profiles?.full_name)}</td>` : ""}
           <td>${esc(r.from_place)}</td><td>${esc(r.to_place)}</td><td>${esc(r.item_type)}</td><td>${r.quantity}</td>
           <td>${fmt(r.amount)}</td><td>${esc(r.plate_no)}</td><td>${esc(r.voucher_no)}</td><td>${esc(r.receiver_name)}</td>
-          <td><span class="badge ${r.status}">${t(r.status)}</span></td><td>${buttons.join("")}</td></tr>`;
+          <td><span class="badge ${r.status}">${statusLabel(r)}</span></td><td>${buttons.join("")}</td></tr>`;
       }).join("") : `<tr><td colspan="${cols.length}">${t("noData")}</td></tr>`;
     }
 
@@ -115,6 +128,12 @@
         v[k] = type === "number" ? Number(val || 0) : (val || null);
       }
       if (v.quantity < 1) v.quantity = 1;
+      const rid = $("f_receiver_id").value;
+      if (!rid && !editingId) return msg(t("fillRequired"));
+      if (rid) {
+        v.receiver_id = rid;
+        v.receiver_name = engineers.find(e => e.id === rid)?.full_name || null;
+      }
       const { error } = editingId
         ? await db.from("shipments").update(v).eq("id", editingId)
         : await db.from("shipments").insert({ ...v, engineer_id: ME.id });
@@ -130,9 +149,10 @@
       const id = b.dataset.id, row = rows.find(r => r.id === id);
       if (b.dataset.act === "recv") {
         await db.rpc("confirm_received", { p_id: id });
-        load();
+        load(); refreshBell();
       } else if (b.dataset.act === "edit") {
         editingId = id;
+        $("f_receiver_id").value = row.receiver_id || "";
         FIELDS.forEach(([k]) => ($("f_" + k).value = row[k] ?? ""));
         $("formTitle").textContent = t("editShipment");
         $("saveBtn").textContent = t("update");

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attendance - Moti DD ERP</title>
+  <link rel="icon" href="img/logo-small.jpg">
+  <meta name="theme-color" content="#3a68a3">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="header"></header>
+  <main>
+
+    <!-- ===== Engineer view ===== -->
+    <div id="engView" hidden>
+      <div class="card">
+        <h2 data-t="attendance"></h2>
+        <p id="todayLine"></p>
+        <p id="statusLine"></p>
+        <p class="big">
+          <button id="readyBtn" data-t="iAmReady"></button>
+          <button id="fieldBtn" class="secondary" data-t="iAmField"></button>
+        </p>
+        <p class="muted" data-t="attendanceRule"></p>
+        <div id="msg" class="msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-t="requestLeave"></h2>
+        <div class="grid">
+          <div><label for="lvFrom" data-t="fromDate"></label><input id="lvFrom" type="date"></div>
+          <div><label for="lvTo" data-t="toDate"></label><input id="lvTo" type="date"></div>
+        </div>
+        <label for="lvReason" data-t="reason"></label>
+        <textarea id="lvReason" rows="2"></textarea>
+        <p><button id="lvSend" data-t="sendRequest"></button></p>
+        <div id="lvMsg" class="msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-t="myLeaves"></h2>
+        <div id="engLeaves"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-t="myRecords"></h2>
+        <div class="table-wrap"><table><thead id="mineHead"></thead><tbody id="mineBody"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- ===== Manager view ===== -->
+    <div id="mgrView" hidden>
+      <div class="card">
+        <h2 data-t="leaveRequests"></h2>
+        <div id="mgrLeaves"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-t="dayBoard"></h2>
+        <label for="boardDate" data-t="date"></label>
+        <input id="boardDate" type="date">
+        <div class="table-wrap"><table><thead id="boardHead"></thead><tbody id="boardBody"></tbody></table></div>
+      </div>
+
+      <div class="card" id="editCard" hidden>
+        <h2 data-t="editRecord"></h2>
+        <p id="editWho"></p>
+        <label for="eStatus" data-t="status"></label>
+        <select id="eStatus"></select>
+        <label for="eReason" data-t="reason"></label>
+        <textarea id="eReason" rows="2"></textarea>
+        <label><input id="eApproved" type="checkbox" style="width:auto"> <span data-t="approved"></span></label>
+        <p><button id="eSave" data-t="save"></button> <button id="eCancel" class="secondary" data-t="cancel"></button></p>
+        <div id="eMsg" class="msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-t="reports"></h2>
+        <div class="grid">
+          <div><label for="rDate" data-t="weeklyReport"></label><input id="rDate" type="date">
+            <p><button id="weekBtn" data-t="download"></button></p></div>
+          <div><label for="rMonth" data-t="monthlyReport"></label><input id="rMonth" type="month">
+            <p><button id="monthBtn" data-t="download"></button></p></div>
+        </div>
+        <div id="rMsg" class="msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-t="holidays"></h2>
+        <div class="grid">
+          <div><label for="hDate" data-t="date"></label><input id="hDate" type="date"></div>
+          <div><label for="hName" data-t="holidayName"></label><input id="hName"></div>
+        </div>
+        <p><button id="hAdd" data-t="add"></button></p>
+        <div class="table-wrap"><table><tbody id="holBody"></tbody></table></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const TZ = "Africa/Addis_Ababa";                       // Ethiopia time (UTC+3, no daylight saving)
+    const todayStr = () => new Date().toLocaleDateString("en-CA", { timeZone: TZ });   // YYYY-MM-DD
+    const clock = ts => new Date(ts).toLocaleTimeString("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
+    const STATUSES = ["ready", "late", "absent", "leave", "field", "dayoff"];
+    const badge = s => `<span class="badge ${s || ""}">${t(s ? "st_" + s : "st_none")}</span>`;
+    let ME, MGR, holidays = [], people = [], dayRows = [], editKey = null;
+
+    const msg = (el, text, ok) => { $(el).textContent = text || ""; $(el).className = "msg" + (ok ? " ok" : ""); };
+    const errText = e => (e.message || "").replace(/^.*?: /, "");
+
+    (async () => {
+      const auth = await requireLogin();
+      if (!auth) return;
+      ME = auth.profile; MGR = ME.role === "manager";
+      renderHeader(ME);
+      translatePage();
+      await db.rpc("sync_attendance");   // fills holidays / absent before we read
+      await loadHolidays();
+      if (MGR) {
+        $("mgrView").hidden = false;
+        $("eStatus").innerHTML = STATUSES.map(s => `<option value="${s}">${t("st_" + s)}</option>`).join("");
+        $("boardDate").value = todayStr(); $("rDate").value = todayStr(); $("rMonth").value = todayStr().slice(0, 7);
+        loadBoard(); loadLeaves(); renderHolidays();
+      } else {
+        $("engView").hidden = false;
+        $("lvFrom").value = $("lvTo").value = todayStr();
+        loadToday(); loadMine(); loadLeaves();
+      }
+    })();
+
+    async function loadHolidays() {
+      const { data } = await db.from("holidays").select("*").order("day");
+      holidays = data || [];
+    }
+
+    // ================= Engineer =================
+    async function loadToday() {
+      const d = todayStr();
+      const { data: rec } = await db.from("attendance").select("*").eq("user_id", ME.id).eq("day", d).maybeSingle();
+      const hol = holidays.find(h => h.day === d);
+      $("todayLine").textContent = d + " · " + clock(new Date());
+      $("statusLine").innerHTML = hol ? esc(t("holidayToday", { name: hol.name })) : badge(rec?.status) + (rec?.checked_at ? " " + clock(rec.checked_at) : "");
+      $("readyBtn").hidden = !!(hol || rec);                                   // already marked (or window closed = absent)
+      $("fieldBtn").hidden = !!(hol || (rec && ["leave", "dayoff", "field"].includes(rec.status)));
+    }
+
+    async function afterAction() { await loadToday(); loadMine(); refreshBell(); }
+
+    $("readyBtn").onclick = async () => {
+      msg("msg", "");
+      const { error } = await db.rpc("check_in");
+      if (error) return msg("msg", error.message.includes("early") ? t("tooEarly") : t("error") + " " + errText(error));
+      msg("msg", t("done"), true); afterAction();
+    };
+    $("fieldBtn").onclick = async () => {
+      msg("msg", "");
+      const { error } = await db.rpc("mark_field");
+      if (error) return msg("msg", t("error") + " " + errText(error));
+      msg("msg", t("done"), true); afterAction();
+    };
+
+    async function loadMine() {
+      const { data } = await db.from("attendance").select("*").eq("user_id", ME.id).order("day", { ascending: false }).limit(31);
+      $("mineHead").innerHTML = "<tr>" + ["date", "status", "time", "reason", "approved"].map(c => `<th>${t(c)}</th>`).join("") + "</tr>";
+      $("mineBody").innerHTML = (data || []).map(r => `<tr><td>${r.day}</td><td>${badge(r.status)}</td>
+        <td>${r.checked_at ? clock(r.checked_at) : ""}</td><td>${esc(r.reason)}</td><td>${r.approved ? "✓" : ""}</td></tr>`).join("")
+        || `<tr><td colspan="5">${t("noData")}</td></tr>`;
+    }
+
+    $("lvSend").onclick = async () => {
+      msg("lvMsg", "");
+      const { error } = await db.rpc("request_leave", { p_from: $("lvFrom").value, p_to: $("lvTo").value, p_reason: $("lvReason").value });
+      if (error) return msg("lvMsg", t("error") + " " + errText(error));
+      $("lvReason").value = ""; msg("lvMsg", t("leaveSent"), true); loadLeaves();
+    };
+
+    // ================= Leave (both) =================
+    async function loadLeaves() {
+      const { data } = await db.from("leave_requests").select("*, profiles(full_name)").order("created_at", { ascending: false }).limit(50);
+      const rows = data || [];
+      if (MGR) {
+        const pend = rows.filter(r => r.status === "pending");
+        $("mgrLeaves").innerHTML = pend.length ? pend.map(r => `<div class="note">
+          <b>${esc(r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}<br>${esc(r.reason)}
+          <input id="ln_${r.id}" placeholder="${esc(t("managerNote"))}">
+          <p><button data-act="lv-ok" data-id="${r.id}">${t("approve")}</button>
+          <button class="secondary" data-act="lv-no" data-id="${r.id}">${t("reject")}</button></p></div>`).join("")
+          : `<p>${t("noRequests")}</p>`;
+      } else {
+        $("engLeaves").innerHTML = rows.length ? rows.map(r => `<div class="note">${r.from_day} → ${r.to_day}
+          <span class="badge ${r.status}">${t("ls_" + r.status)}</span><br>${esc(r.reason)}
+          ${r.manager_note ? `<br><i>${esc(r.manager_note)}</i>` : ""}</div>`).join("") : `<p>${t("noData")}</p>`;
+      }
+    }
+
+    // ================= Manager: day board + edit =================
+    async function loadBoard() {
+      const day = $("boardDate").value;
+      const [p, a] = await Promise.all([
+        db.from("profiles").select("id, full_name").eq("role", "engineer").eq("active", true).order("full_name"),
+        db.from("attendance").select("*").eq("day", day),
+      ]);
+      people = p.data || []; dayRows = a.data || [];
+      $("boardHead").innerHTML = "<tr>" + ["engineer", "status", "time", "reason", "approved", "actions"].map(c => `<th>${t(c)}</th>`).join("") + "</tr>";
+      $("boardBody").innerHTML = people.map(u => {
+        const r = dayRows.find(x => x.user_id === u.id);
+        return `<tr><td>${esc(u.full_name)}</td><td>${badge(r?.status)}</td><td>${r?.checked_at ? clock(r.checked_at) : ""}</td>
+          <td>${esc(r?.reason)}</td><td>${r?.approved ? "✓" : ""}</td>
+          <td><button class="secondary" data-act="edit" data-u="${u.id}">${t("edit")}</button></td></tr>`;
+      }).join("") || `<tr><td colspan="6">${t("noData")}</td></tr>`;
+    }
+    $("boardDate").onchange = loadBoard;
+
+    function openEdit(userId) {
+      const u = people.find(x => x.id === userId), r = dayRows.find(x => x.user_id === userId);
+      editKey = { user_id: userId, day: $("boardDate").value };
+      $("editWho").textContent = u.full_name + " · " + editKey.day;
+      $("eStatus").value = r?.status || "absent";
+      $("eReason").value = r?.reason || "";
+      $("eApproved").checked = !!r?.approved;
+      msg("eMsg", ""); $("editCard").hidden = false; $("editCard").scrollIntoView();
+    }
+    $("eCancel").onclick = () => ($("editCard").hidden = true);
+    $("eSave").onclick = async () => {
+      const row = { ...editKey, status: $("eStatus").value, reason: $("eReason").value.trim() || null, approved: $("eApproved").checked, edited_by: ME.id };
+      const { error } = await db.from("attendance").upsert(row, { onConflict: "user_id,day" });
+      if (error) return msg("eMsg", t("error") + " " + error.message);
+      $("editCard").hidden = true; loadBoard();
+    };
+
+    // ================= Manager: holidays =================
+    function renderHolidays() {
+      const from = todayStr();
+      $("holBody").innerHTML = holidays.filter(h => h.day >= from).map(h =>
+        `<tr><td>${h.day}</td><td>${esc(h.name)}</td><td><button class="secondary" data-act="hdel" data-d="${h.day}">${t("del")}</button></td></tr>`).join("");
+    }
+    $("hAdd").onclick = async () => {
+      if (!$("hDate").value || !$("hName").value.trim()) return;
+      const { error } = await db.from("holidays").upsert({ day: $("hDate").value, name: $("hName").value.trim() });
+      if (error) return alert(error.message);
+      $("hName").value = ""; await loadHolidays(); renderHolidays();
+    };
+
+    // ================= Manager: Excel reports (Saturday - Friday) =================
+    const addDays = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+    async function makeReport(from, to, fileName) {
+      msg("rMsg", "");
+      const [p, a] = await Promise.all([
+        db.from("profiles").select("id, full_name").eq("role", "engineer").order("full_name"),
+        db.from("attendance").select("*").gte("day", from).lte("day", to).order("day"),
+      ]);
+      if (p.error || a.error) return msg("rMsg", t("error"));
+      const name = Object.fromEntries(p.data.map(x => [x.id, x.full_name]));
+      const summary = p.data.map(u => {
+        const mine = a.data.filter(r => r.user_id === u.id);
+        const row = { [t("engineer")]: u.full_name };
+        STATUSES.forEach(s => (row[t("st_" + s)] = mine.filter(r => r.status === s).length));
+        return row;
+      });
+      const daily = a.data.map(r => ({
+        [t("date")]: r.day, [t("engineer")]: name[r.user_id] || "", [t("status")]: t("st_" + r.status),
+        [t("time")]: r.checked_at ? clock(r.checked_at) : "", [t("reason")]: r.reason || "", [t("approved")]: r.approved ? t("yes") : "",
+      }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), t("summary"));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(daily), t("daily"));
+      XLSX.writeFile(wb, fileName);
+    }
+
+    $("weekBtn").onclick = () => {
+      const d = new Date($("rDate").value + "T00:00:00Z");
+      if (isNaN(d)) return;
+      const start = addDays($("rDate").value, -((d.getUTCDay() + 1) % 7));   // back to Saturday
+      makeReport(start, addDays(start, 6), `attendance-week-${start}.xlsx`);
+    };
+    $("monthBtn").onclick = () => {
+      const m = $("rMonth").value;
+      if (!m) return;
+      const [y, mo] = m.split("-").map(Number);
+      const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
+      makeReport(m + "-01", last, `attendance-month-${m}.xlsx`);
+    };
+
+    // ================= Buttons inside lists =================
+    document.body.onclick = async (e) => {
+      const b = e.target.closest("button[data-act]");
+      if (!b) return;
+      const act = b.dataset.act;
+      try {
+        if (act === "edit") return openEdit(b.dataset.u);
+        if (act === "lv-ok" || act === "lv-no") {
+          const id = b.dataset.id;
+          const { error } = await db.rpc("decide_leave", { p_id: id, p_approve: act === "lv-ok", p_note: $("ln_" + id).value });
+          if (error) throw error;
+          loadLeaves(); loadBoard();
+        } else if (act === "hdel") {
+          await db.from("holidays").delete().eq("day", b.dataset.d);
+          await loadHolidays(); renderHolidays();
+        }
+      } catch (err) { alert(err.message); }
+    };
+  </script>
+</body>
+</html>
