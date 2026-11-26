@@ -13,7 +13,7 @@
   <main>
     <div id="alert"></div>
 
-    <div class="card">
+    <div class="card" id="formCard">
       <h2 id="formTitle"></h2>
       <div class="grid" id="fields"></div>
       <p>
@@ -21,6 +21,23 @@
         <button id="cancelBtn" class="secondary" hidden></button>
       </p>
       <div id="msg" class="msg"></div>
+    </div>
+
+    <div class="card" id="reportCard" hidden>
+      <h2 data-t="shipReport"></h2>
+      <div class="grid">
+        <div><label for="rFrom" data-t="fromDate"></label><input id="rFrom" type="date"></div>
+        <div><label for="rTo" data-t="toDate"></label><input id="rTo" type="date"></div>
+      </div>
+      <p>
+        <button id="rShow" data-t="showReport"></button>
+        <button id="rXls" class="secondary" data-t="download"></button>
+        <button id="rPng" class="secondary" data-t="downloadChart"></button>
+      </p>
+      <div class="charts">
+        <div><h3 data-t="chartAmountDay"></h3><div class="chart-box"><canvas id="rc1"></canvas></div></div>
+        <div><h3 data-t="chartBySender"></h3><div class="chart-box"><canvas id="rc2"></canvas></div></div>
+      </div>
     </div>
 
     <div class="card">
@@ -31,34 +48,48 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/common.js"></script>
   <script>
     const $ = id => document.getElementById(id);
+    const TZ = "Africa/Addis_Ababa";
+    const dayOf = ts => new Date(ts).toLocaleDateString("en-CA", { timeZone: TZ });
+    const addDays = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
     // [column name, label key, input type, required?]  (the receiving engineer is a separate drop-down)
     const FIELDS = [
       ["voucher_no", "voucher", "text"], ["plate_no", "plate", "text"],
       ["from_place", "from", "text", true], ["to_place", "to", "text", true], ["item_type", "itemType", "text", true],
       ["quantity", "quantity", "number"], ["amount", "amount", "number"],
     ];
-    let ME, rows = [], engineers = [], editingId = null;
+    const PALETTE = ["#5081bc", "#25b36a", "#f0b429", "#ea6a6a", "#8e6ed8", "#3bbfae", "#e58a3c", "#7a8aa0"];
+    let ME, VIEW, ADMIN, rows = [], engineers = [], editingId = null, charts = [];
 
     const msg = (text, ok) => { $("msg").textContent = text || ""; $("msg").className = "msg" + (ok ? " ok" : ""); };
     const fmt = n => Number(n).toLocaleString();
+    const senderOf = r => r.sender_name || r.profiles?.full_name || "";
 
     (async () => {
       const auth = await requireLogin();
       if (!auth) return;
-      ME = auth.profile;
+      ME = auth.profile; VIEW = canView(ME); ADMIN = ME.role === "admin";
       renderHeader(ME);
-      const { data: eng } = await db.rpc("list_engineers");
-      engineers = (eng || []).filter(e => e.id !== ME.id);
-      const receiverBox = `<div><label for="f_receiver_id">${t("receiverEng")}</label><select id="f_receiver_id">
-        <option value="">${t("selectOne")}</option>${engineers.map(e => `<option value="${e.id}">${esc(e.full_name)}</option>`).join("")}</select></div>`;
-      $("fields").innerHTML = receiverBox + FIELDS.map(([k, l, type]) =>
-        `<div><label for="f_${k}">${t(l)}</label><input id="f_${k}" type="${type}" ${type === "number" ? 'min="0" step="any" inputmode="decimal"' : ""}></div>`).join("");
-      resetForm();
+      if (ADMIN) $("formCard").hidden = true;   // admin only watches
+      else {
+        const { data: eng } = await db.rpc("list_engineers");
+        engineers = (eng || []).filter(e => e.id !== ME.id);
+        const receiverBox = `<div><label for="f_receiver_id">${t("receiverEng")}</label><select id="f_receiver_id">
+          <option value="">${t("selectOne")}</option>${engineers.map(e => `<option value="${e.id}">${esc(e.full_name)}</option>`).join("")}</select></div>`;
+        $("fields").innerHTML = receiverBox + FIELDS.map(([k, l, type]) =>
+          `<div><label for="f_${k}">${t(l)}</label><input id="f_${k}" type="${type}" ${type === "number" ? 'min="0" step="any" inputmode="decimal"' : ""}></div>`).join("");
+        resetForm();
+      }
+      if (VIEW) {
+        $("reportCard").hidden = false;
+        $("rTo").value = dayOf(new Date()); $("rFrom").value = addDays($("rTo").value, -29);
+      }
       translatePage();
       load();
     })();
@@ -74,33 +105,34 @@
     }
 
     async function load() {
-      const { data, error } = await db.from("shipments").select("*, profiles(full_name)").order("serial_no", { ascending: false });
+      const { data, error } = await db.from("shipments").select("*").order("serial_no", { ascending: false });
       if (error) return msg(t("error") + " " + error.message);
       rows = data;
       render();
+      if (VIEW) drawReport();
     }
 
-    // Sender sees "Sent"; receiver and manager see "Pending" until the receiver confirms
+    // Sender sees "Sent"; receiver and manager/admin see "Pending" until the receiver confirms
     function statusLabel(r) {
       if (r.status === "received") return t("received");
       return r.engineer_id === ME.id ? t("sent") : t("pending");
     }
 
     function render() {
-      const mgr = ME.role === "manager";
+      const mgr = isManager(ME);
       $("totals").textContent = t("total") + ": " + fmt(rows.reduce((s, r) => s + Number(r.amount), 0)) + " birr";
 
-      // Manager: show the 4500 report banner
-      if (mgr) {
+      if (VIEW) {
         const open = rows.filter(r => !r.reported).reduce((s, r) => s + Number(r.amount), 0);
         $("alert").innerHTML = open >= CONFIG.REPORT_THRESHOLD
-          ? `<div class="alert"><b>${t("reportDue", { n: fmt(open), limit: fmt(CONFIG.REPORT_THRESHOLD) })}</b> <button id="markReported">${t("markReported")}</button></div>`
+          ? `<div class="alert"><b>${t("reportDue", { n: fmt(open), limit: fmt(CONFIG.REPORT_THRESHOLD) })}</b> ${mgr ? `<button id="markReported">${t("markReported")}</button>` : ""}</div>`
           : `<div class="note">${t("unreportedTotal")}: ${fmt(open)} / ${fmt(CONFIG.REPORT_THRESHOLD)}</div>`;
         const b = $("markReported");
         if (b) b.onclick = async () => { await db.from("shipments").update({ reported: true }).eq("reported", false); load(); };
+        if (ADMIN) $("alert").insertAdjacentHTML("afterbegin", `<div class="ro-note">${t("viewOnly")}</div>`);
       }
 
-      const cols = ["#", "dateTime"].concat(mgr ? ["engineer"] : [], ["from", "to", "itemType", "quantity", "amount", "plate", "voucher", "receiver", "status", "actions"]);
+      const cols = ["#", "dateTime", "sender", "receiver", "from", "to", "itemType", "quantity", "amount", "plate", "voucher", "status"].concat(ADMIN ? [] : ["actions"]);
       $("thead").innerHTML = "<tr>" + cols.map(c => `<th>${c === "#" ? "#" : t(c)}</th>`).join("") + "</tr>";
 
       $("tbody").innerHTML = rows.length ? rows.map(r => {
@@ -111,14 +143,66 @@
         if (mgr) buttons.push(`<button class="secondary" data-act="edit" data-id="${r.id}">${t("edit")}</button>`, `<button class="secondary" data-act="del" data-id="${r.id}">${t("del")}</button>`);
         return `<tr>
           <td>${r.serial_no}</td><td>${esc(new Date(r.sent_at).toLocaleString(getLang() === "am" ? "am-ET" : "en-GB"))}</td>
-          ${mgr ? `<td>${esc(r.profiles?.full_name)}</td>` : ""}
+          <td>${esc(senderOf(r))}</td><td>${esc(r.receiver_name)}</td>
           <td>${esc(r.from_place)}</td><td>${esc(r.to_place)}</td><td>${esc(r.item_type)}</td><td>${r.quantity}</td>
-          <td>${fmt(r.amount)}</td><td>${esc(r.plate_no)}</td><td>${esc(r.voucher_no)}</td><td>${esc(r.receiver_name)}</td>
-          <td><span class="badge ${r.status}">${statusLabel(r)}</span></td><td>${buttons.join("")}</td></tr>`;
+          <td>${fmt(r.amount)}</td><td>${esc(r.plate_no)}</td><td>${esc(r.voucher_no)}</td>
+          <td><span class="badge ${r.status}">${statusLabel(r)}</span></td>${ADMIN ? "" : `<td>${buttons.join("")}</td>`}</tr>`;
       }).join("") : `<tr><td colspan="${cols.length}">${t("noData")}</td></tr>`;
     }
 
-    // Save (new or edited)
+    // ---------- Report: graphs + Excel (manager / admin) ----------
+    const inRange = r => { const d = dayOf(r.sent_at); return d >= $("rFrom").value && d <= $("rTo").value; };
+    function group(R, keyFn, valFn) { const o = {}; R.forEach(r => { const k = keyFn(r) || "-"; o[k] = (o[k] || 0) + valFn(r); }); return o; }
+
+    function drawReport() {
+      const R = rows.filter(inRange);
+      charts.forEach(c => c.destroy());
+      const byDay = group(R, r => dayOf(r.sent_at), r => Number(r.amount));
+      const days = Object.keys(byDay).sort();
+      const bySender = group(R, senderOf, () => 1);
+      Chart.defaults.font.family = "system-ui, 'Noto Sans Ethiopic', sans-serif";
+      charts = [
+        new Chart($("rc1"), { type: "bar", data: { labels: days.map(d => d.slice(5)), datasets: [{ label: t("amount"), data: days.map(d => byDay[d]), backgroundColor: "#5081bc", borderRadius: 6 }] },
+          options: { responsive: true, maintainAspectRatio: false, animation: { duration: 1100 }, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } } }),
+        new Chart($("rc2"), { type: "doughnut", data: { labels: Object.keys(bySender), datasets: [{ data: Object.values(bySender), backgroundColor: PALETTE, borderWidth: 2 }] },
+          options: { responsive: true, maintainAspectRatio: false, cutout: "55%", animation: { duration: 1300 } } }),
+      ];
+    }
+    $("rShow").onclick = drawReport;
+    $("rFrom").onchange = $("rTo").onchange = drawReport;
+
+    $("rPng").onclick = () => {
+      const a = document.createElement("a");
+      a.href = $("rc1").toDataURL("image/png"); a.download = `shipments-graph-${$("rFrom").value}_${$("rTo").value}.png`; a.click();
+    };
+
+    $("rXls").onclick = () => {
+      const R = rows.filter(inRange);
+      const status = r => (r.status === "received" ? t("received") : t("pendingCount"));
+      const sum = [
+        { [t("sheetSummary")]: t("totalShipments"), [t("count")]: R.length },
+        { [t("sheetSummary")]: t("totalAmount"), [t("count")]: R.reduce((s, r) => s + Number(r.amount), 0) },
+        { [t("sheetSummary")]: t("receivedCount"), [t("count")]: R.filter(r => r.status === "received").length },
+        { [t("sheetSummary")]: t("pendingCount"), [t("count")]: R.filter(r => r.status !== "received").length },
+      ];
+      const tableOf = (keyFn, label) => {
+        const n = group(R, keyFn, () => 1), q = group(R, keyFn, r => Number(r.quantity)), a = group(R, keyFn, r => Number(r.amount));
+        return Object.keys(n).map(k => ({ [label]: k, [t("count")]: n[k], [t("quantity")]: q[k], [t("amount")]: a[k] }));
+      };
+      const details = R.map(r => ({
+        "#": r.serial_no, [t("dateTime")]: new Date(r.sent_at).toLocaleString("en-GB", { timeZone: TZ }), [t("sender")]: senderOf(r), [t("receiver")]: r.receiver_name || "",
+        [t("from")]: r.from_place, [t("to")]: r.to_place, [t("itemType")]: r.item_type, [t("quantity")]: r.quantity,
+        [t("amount")]: Number(r.amount), [t("plate")]: r.plate_no || "", [t("voucher")]: r.voucher_no || "", [t("status")]: status(r),
+      }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sum), t("sheetSummary"));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tableOf(senderOf, t("sender"))), t("sheetBySender"));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tableOf(r => r.item_type, t("itemType"))), t("sheetByItem"));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(details), t("sheetDetails"));
+      XLSX.writeFile(wb, `shipments-${$("rFrom").value}_${$("rTo").value}.xlsx`);
+    };
+
+    // ---------- Save (new or edited) ----------
     $("saveBtn").onclick = async () => {
       msg("");
       const v = {};

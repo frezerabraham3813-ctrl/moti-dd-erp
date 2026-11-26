@@ -38,7 +38,7 @@ module.exports = async (req, res) => {
       if (!r.ok) return fail(400, made.msg || made.message || "Could not create user (username may already exist).");
       const p = await call("/rest/v1/profiles", {
         method: "POST", headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ id: made.id, username, full_name, role: role === "manager" ? "manager" : "engineer" }),
+        body: JSON.stringify({ id: made.id, username, full_name, role: ["manager", "admin"].includes(role) ? role : "engineer" }),
       });
       if (!p.ok) { await call(`/auth/v1/admin/users/${made.id}`, { method: "DELETE" }); return fail(400, "Could not save profile (username may already exist)."); }
       return res.json({ ok: true });

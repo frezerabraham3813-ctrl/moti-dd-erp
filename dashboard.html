@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard - Moti DD ERP</title>
+  <link rel="icon" href="img/logo-small.jpg">
+  <meta name="theme-color" content="#3a68a3">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="header"></header>
+  <main>
+    <div class="card"><h2 id="hello"></h2><div id="roNote"></div><div id="todayBox"></div></div>
+    <div class="kpis" id="kpis"></div>
+    <div class="charts">
+      <div class="card"><h2 id="c1Title"></h2><div class="chart-box"><canvas id="c1"></canvas></div></div>
+      <div class="card" id="c2Card"><h2 id="c2Title"></h2><div class="chart-box"><canvas id="c2"></canvas></div></div>
+    </div>
+    <div class="card"><p>
+      <a href="attendance.html"><button data-t="goAttendance"></button></a>
+      <a href="shipments.html"><button class="secondary" data-t="goShipments"></button></a></p></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const TZ = "Africa/Addis_Ababa";
+    const dayOf = ts => new Date(ts).toLocaleDateString("en-CA", { timeZone: TZ });
+    const todayStr = () => dayOf(new Date());
+    const addDays = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const COLORS = { ready: "#25b36a", late: "#f0b429", absent: "#ea6a6a", leave: "#5b8fd0", field: "#8e6ed8", dayoff: "#b8c2d0" };
+    const kpi = (id, label) => `<div class="kpi"><div class="num" id="${id}">0</div><div class="lbl">${label}</div></div>`;
+    const count = q => q.then(r => r.count || 0, () => 0);
+    let ME;
+
+    (async () => {
+      const auth = await requireLogin();
+      if (!auth) return;
+      ME = auth.profile;
+      renderHeader(ME); translatePage();
+      Chart.defaults.font.family = "system-ui, 'Noto Sans Ethiopic', sans-serif";
+      Chart.defaults.animation = { duration: 1200, easing: "easeOutQuart" };
+      $("hello").textContent = t("welcome") + ", " + ME.full_name;
+      await db.rpc("sync_attendance");
+      canView(ME) ? loadOverview() : loadMine();
+    })();
+
+    // ---------- Manager / admin ----------
+    async function loadOverview() {
+      if (ME.role === "admin") $("roNote").innerHTML = `<div class="ro-note">${t("viewOnly")}</div>`;
+      const today = todayStr(), d7 = addDays(today, -6), d14 = addDays(today, -13);
+      const [att, ship, pend, leaves] = await Promise.all([
+        db.from("attendance").select("day, status").gte("day", d7),
+        db.from("shipments").select("amount, sent_at").gte("sent_at", d14 + "T00:00:00Z"),
+        count(db.from("shipments").select("id", { count: "exact", head: true }).eq("status", "sent")),
+        count(db.from("leave_requests").select("id", { count: "exact", head: true }).eq("status", "pending")),
+      ]);
+      const A = att.data || [], S = ship.data || [];
+      const nowRows = A.filter(r => r.day === today);
+      const c = s => nowRows.filter(r => r.status === s).length;
+      $("kpis").innerHTML = kpi("k1", t("kpiPresent")) + kpi("k2", t("kpiLate")) + kpi("k3", t("kpiAbsent")) +
+        kpi("k4", t("kpiAway")) + kpi("k5", t("kpiPendingShip")) + kpi("k6", t("kpiLeaveReq"));
+      [c("ready"), c("late"), c("absent"), c("leave") + c("field"), pend, leaves].forEach((v, i) => countUp($("k" + (i + 1)), v));
+
+      // Chart 1: attendance, last 7 days (stacked)
+      const days7 = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
+      $("c1Title").textContent = t("att7");
+      new Chart($("c1"), {
+        type: "bar",
+        data: { labels: days7.map(d => d.slice(5)), datasets: ["ready", "late", "absent", "leave", "field"].map(s => ({
+          label: t("st_" + s), backgroundColor: COLORS[s], borderRadius: 4, data: days7.map(d => A.filter(r => r.day === d && r.status === s).length) })) },
+        options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } },
+      });
+
+      // Chart 2: shipments amount, last 14 days
+      const days14 = Array.from({ length: 14 }, (_, i) => addDays(today, i - 13));
+      $("c2Title").textContent = t("ship14");
+      new Chart($("c2"), {
+        type: "line",
+        data: { labels: days14.map(d => d.slice(5)), datasets: [{ label: t("amount"), borderColor: "#3a68a3", backgroundColor: "rgba(80,129,188,.25)",
+          fill: true, tension: .35, pointRadius: 3, data: days14.map(d => S.filter(r => dayOf(r.sent_at) === d).reduce((s, r) => s + Number(r.amount), 0)) }] },
+        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } },
+      });
+    }
+
+    // ---------- Engineer ----------
+    async function loadMine() {
+      const today = todayStr(), m1 = today.slice(0, 8) + "01";
+      const [rec, mine, toRec, sent] = await Promise.all([
+        db.from("attendance").select("status").eq("user_id", ME.id).eq("day", today).maybeSingle(),
+        db.from("attendance").select("status").eq("user_id", ME.id).gte("day", m1),
+        count(db.from("shipments").select("id", { count: "exact", head: true }).eq("receiver_id", ME.id).eq("status", "sent")),
+        count(db.from("shipments").select("id", { count: "exact", head: true }).eq("engineer_id", ME.id)),
+      ]);
+      const st = rec.data?.status;
+      $("todayBox").innerHTML = `<p>${t("myStatus")}: <span class="badge ${st || ""}">${t(st ? "st_" + st : "st_none")}</span></p>`;
+      const M = mine.data || [];
+      $("kpis").innerHTML = kpi("k1", t("st_ready")) + kpi("k2", t("st_late")) + kpi("k3", t("st_absent")) + kpi("k5", t("toReceive")) + kpi("k6", t("mySent"));
+      const c = s => M.filter(r => r.status === s).length;
+      [["k1", c("ready")], ["k2", c("late")], ["k3", c("absent")], ["k5", toRec], ["k6", sent]].forEach(([id, v]) => countUp($(id), v));
+      $("c2Card").hidden = true;
+      $("c1Title").textContent = t("myMonth");
+      const keys = ["ready", "late", "absent", "leave", "field"];
+      new Chart($("c1"), {
+        type: "doughnut",
+        data: { labels: keys.map(s => t("st_" + s)), datasets: [{ data: keys.map(c), backgroundColor: keys.map(s => COLORS[s]), borderWidth: 2 }] },
+        options: { responsive: true, maintainAspectRatio: false, cutout: "62%", animation: { animateRotate: true, duration: 1400 } },
+      });
+    }
+  </script>
+</body>
+</html>

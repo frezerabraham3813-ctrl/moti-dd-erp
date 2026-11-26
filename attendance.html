@@ -51,6 +51,7 @@
 
     <!-- ===== Manager view ===== -->
     <div id="mgrView" hidden>
+      <div id="roNote"></div>
       <div class="card">
         <h2 data-t="leaveRequests"></h2>
         <div id="mgrLeaves"></div>
@@ -88,11 +89,13 @@
 
       <div class="card">
         <h2 data-t="holidays"></h2>
+        <div id="holAdd">
         <div class="grid">
           <div><label for="hDate" data-t="date"></label><input id="hDate" type="date"></div>
           <div><label for="hName" data-t="holidayName"></label><input id="hName"></div>
         </div>
         <p><button id="hAdd" data-t="add"></button></p>
+        </div>
         <div class="table-wrap"><table><tbody id="holBody"></tbody></table></div>
       </div>
     </div>
@@ -110,7 +113,7 @@
     const clock = ts => new Date(ts).toLocaleTimeString("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
     const STATUSES = ["ready", "late", "absent", "leave", "field", "dayoff"];
     const badge = s => `<span class="badge ${s || ""}">${t(s ? "st_" + s : "st_none")}</span>`;
-    let ME, MGR, holidays = [], people = [], dayRows = [], editKey = null;
+    let ME, MGR, ADM, VIEW, holidays = [], people = [], dayRows = [], editKey = null;
 
     const msg = (el, text, ok) => { $(el).textContent = text || ""; $(el).className = "msg" + (ok ? " ok" : ""); };
     const errText = e => (e.message || "").replace(/^.*?: /, "");
@@ -118,13 +121,14 @@
     (async () => {
       const auth = await requireLogin();
       if (!auth) return;
-      ME = auth.profile; MGR = ME.role === "manager";
+      ME = auth.profile; MGR = ME.role === "manager"; ADM = ME.role === "admin"; VIEW = MGR || ADM;
       renderHeader(ME);
       translatePage();
       await db.rpc("sync_attendance");   // fills holidays / absent before we read
       await loadHolidays();
-      if (MGR) {
+      if (VIEW) {
         $("mgrView").hidden = false;
+        if (ADM) { $("roNote").innerHTML = `<div class="ro-note">${t("viewOnly")}</div>`; $("holAdd").hidden = true; }
         $("eStatus").innerHTML = STATUSES.map(s => `<option value="${s}">${t("st_" + s)}</option>`).join("");
         $("boardDate").value = todayStr(); $("rDate").value = todayStr(); $("rMonth").value = todayStr().slice(0, 7);
         loadBoard(); loadLeaves(); renderHolidays();
@@ -185,7 +189,10 @@
     async function loadLeaves() {
       const { data } = await db.from("leave_requests").select("*, profiles(full_name)").order("created_at", { ascending: false }).limit(50);
       const rows = data || [];
-      if (MGR) {
+      if (ADM) {
+        $("mgrLeaves").innerHTML = rows.length ? rows.map(r => `<div class="note"><b>${esc(r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}
+          <span class="badge ${r.status}">${t("ls_" + r.status)}</span><br>${esc(r.reason)}${r.manager_note ? `<br><i>${esc(r.manager_note)}</i>` : ""}</div>`).join("") : `<p>${t("noRequests")}</p>`;
+      } else if (MGR) {
         const pend = rows.filter(r => r.status === "pending");
         $("mgrLeaves").innerHTML = pend.length ? pend.map(r => `<div class="note">
           <b>${esc(r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}<br>${esc(r.reason)}
@@ -213,7 +220,7 @@
         const r = dayRows.find(x => x.user_id === u.id);
         return `<tr><td>${esc(u.full_name)}</td><td>${badge(r?.status)}</td><td>${r?.checked_at ? clock(r.checked_at) : ""}</td>
           <td>${esc(r?.reason)}</td><td>${r?.approved ? "✓" : ""}</td>
-          <td><button class="secondary" data-act="edit" data-u="${u.id}">${t("edit")}</button></td></tr>`;
+          <td>${MGR ? `<button class="secondary" data-act="edit" data-u="${u.id}">${t("edit")}</button>` : ""}</td></tr>`;
       }).join("") || `<tr><td colspan="6">${t("noData")}</td></tr>`;
     }
     $("boardDate").onchange = loadBoard;
@@ -239,7 +246,7 @@
     function renderHolidays() {
       const from = todayStr();
       $("holBody").innerHTML = holidays.filter(h => h.day >= from).map(h =>
-        `<tr><td>${h.day}</td><td>${esc(h.name)}</td><td><button class="secondary" data-act="hdel" data-d="${h.day}">${t("del")}</button></td></tr>`).join("");
+        `<tr><td>${h.day}</td><td>${esc(h.name)}</td><td>${MGR ? `<button class="secondary" data-act="hdel" data-d="${h.day}">${t("del")}</button>` : ""}</td></tr>`).join("");
     }
     $("hAdd").onclick = async () => {
       if (!$("hDate").value || !$("hName").value.trim()) return;

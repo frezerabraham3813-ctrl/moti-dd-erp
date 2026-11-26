@@ -5,14 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Moti DD ERP</title>
   <link rel="icon" href="img/logo-small.jpg">
-  <meta name="theme-color" content="#3a68a3">
+  <meta name="theme-color" content="#1f3a5f">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <main style="max-width:420px">
-    <div class="card">
+  <div class="login-bg">
+    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+    <div class="login-card">
       <img class="login-logo" src="img/logo.jpg" alt="Moti Engineering">
       <h1 class="login-title" data-t="appName"></h1>
+      <p class="login-sub" data-t="loginSub"></p>
       <label for="username" data-t="username"></label>
       <input id="username" autocomplete="username" autocapitalize="none">
       <label for="password" data-t="password"></label>
@@ -22,7 +24,7 @@
       <select id="langSel"><option value="en">English</option><option value="am">አማርኛ</option></select>
       <div id="msg" class="msg"></div>
     </div>
-  </main>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <script src="js/config.js"></script>
@@ -35,15 +37,16 @@
 
     $("langSel").value = getLang();
     $("langSel").onchange = () => setLang($("langSel").value);
+    $("password").addEventListener("keydown", e => { if (e.key === "Enter") $("loginBtn").click(); });
 
     // Already logged in? Go straight to the app.
-    db.auth.getSession().then(({ data }) => { if (data.session) location.href = "shipments.html"; });
+    db.auth.getSession().then(({ data }) => { if (data.session) location.href = "dashboard.html"; });
 
     $("loginBtn").onclick = async () => {
       show("");
       const { error } = await db.auth.signInWithPassword({ email: toEmail($("username").value), password: $("password").value });
       if (error) return show(t("wrongLogin"));
-      location.href = "shipments.html";
+      location.href = "dashboard.html";
     };
 
     // "Forgot password" only sends a request; the manager approves it and sets a new password.

@@ -18,7 +18,7 @@
         <div><label for="u_name" data-t="fullName"></label><input id="u_name"></div>
         <div><label for="u_pass" data-t="tempPassword"></label><input id="u_pass" type="password" autocomplete="new-password"></div>
         <div><label for="u_role" data-t="role"></label>
-          <select id="u_role"><option value="engineer"></option><option value="manager"></option></select></div>
+          <select id="u_role"><option value="engineer"></option><option value="manager"></option><option value="admin"></option></select></div>
       </div>
       <p><button id="createBtn" data-t="createUser"></button></p>
       <div id="msg" class="msg"></div>
@@ -50,7 +50,7 @@
       ME = auth.profile;
       renderHeader(ME);
       const opts = $("u_role").options;
-      opts[0].textContent = t("engineer"); opts[1].textContent = t("manager");
+      opts[0].textContent = t("engineer"); opts[1].textContent = t("manager"); opts[2].textContent = t("admin") + " (" + t("viewOnly") + ")";
       translatePage();
       load();
     })();
