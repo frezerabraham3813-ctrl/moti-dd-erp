@@ -105,7 +105,9 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
+  <script src="js/i18n-round1.js"></script>
   <script src="js/common.js"></script>
+  <script src="js/timer.js"></script>
   <script>
     const $ = id => document.getElementById(id);
     const TZ = "Africa/Addis_Ababa";                       // Ethiopia time (UTC+3, no daylight saving)
@@ -113,6 +115,14 @@
     const clock = ts => new Date(ts).toLocaleTimeString("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
     const STATUSES = ["ready", "late", "absent", "leave", "field", "dayoff"];
     const badge = s => `<span class="badge ${s || ""}">${t(s ? "st_" + s : "st_none")}</span>`;
+    // Minutes after 2:30 (Ethiopian morning time = 8:30 clock) when a late engineer pressed "ready"
+    const lateMins = r => {
+      if (r?.status !== "late" || !r.checked_at) return 0;
+      const [h, m] = clock(r.checked_at).split(":").map(Number);
+      return Math.max(0, h * 60 + m - 510);
+    };
+    const timeCell = r => r?.checked_at ? clock(r.checked_at) + (lateMins(r) ? ` <small>(+${lateMins(r)} ${t("minShort")})</small>` : "") : "";
+    const pendingOf = r => (r.status === "pending" ? " " + pendingBadge(r.created_at) : "");
     let ME, MGR, ADM, VIEW, holidays = [], people = [], dayRows = [], editKey = null;
 
     const msg = (el, text, ok) => { $(el).textContent = text || ""; $(el).className = "msg" + (ok ? " ok" : ""); };
@@ -150,7 +160,7 @@
       const { data: rec } = await db.from("attendance").select("*").eq("user_id", ME.id).eq("day", d).maybeSingle();
       const hol = holidays.find(h => h.day === d);
       $("todayLine").textContent = d + " · " + clock(new Date());
-      $("statusLine").innerHTML = hol ? esc(t("holidayToday", { name: hol.name })) : badge(rec?.status) + (rec?.checked_at ? " " + clock(rec.checked_at) : "");
+      $("statusLine").innerHTML = hol ? esc(t("holidayToday", { name: hol.name })) : badge(rec?.status) + " " + timeCell(rec);
       $("readyBtn").hidden = !!(hol || rec);                                   // already marked (or window closed = absent)
       $("fieldBtn").hidden = !!(hol || (rec && ["leave", "dayoff", "field"].includes(rec.status)));
     }
@@ -174,7 +184,7 @@
       const { data } = await db.from("attendance").select("*").eq("user_id", ME.id).order("day", { ascending: false }).limit(31);
       $("mineHead").innerHTML = "<tr>" + ["date", "status", "time", "reason", "approved"].map(c => `<th>${t(c)}</th>`).join("") + "</tr>";
       $("mineBody").innerHTML = (data || []).map(r => `<tr><td>${r.day}</td><td>${badge(r.status)}</td>
-        <td>${r.checked_at ? clock(r.checked_at) : ""}</td><td>${esc(r.reason)}</td><td>${r.approved ? "✓" : ""}</td></tr>`).join("")
+        <td>${timeCell(r)}</td><td>${esc(r.reason)}</td><td>${r.approved ? "✓" : ""}</td></tr>`).join("")
         || `<tr><td colspan="5">${t("noData")}</td></tr>`;
     }
 
@@ -186,28 +196,29 @@
     };
 
     // ================= Leave (both) =================
+    // Pending leave requests show a timer that counts from the time they were sent
     async function loadLeaves() {
       const { data } = await db.from("leave_requests").select("*, profiles(full_name)").order("created_at", { ascending: false }).limit(50);
       const rows = data || [];
       if (ADM) {
         $("mgrLeaves").innerHTML = rows.length ? rows.map(r => `<div class="note"><b>${esc(r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}
-          <span class="badge ${r.status}">${t("ls_" + r.status)}</span><br>${esc(r.reason)}${r.manager_note ? `<br><i>${esc(r.manager_note)}</i>` : ""}</div>`).join("") : `<p>${t("noRequests")}</p>`;
+          <span class="badge ${r.status}">${t("ls_" + r.status)}</span>${pendingOf(r)}<br>${esc(r.reason)}${r.manager_note ? `<br><i>${esc(r.manager_note)}</i>` : ""}</div>`).join("") : `<p>${t("noRequests")}</p>`;
       } else if (MGR) {
         const pend = rows.filter(r => r.status === "pending");
         $("mgrLeaves").innerHTML = pend.length ? pend.map(r => `<div class="note">
-          <b>${esc(r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}<br>${esc(r.reason)}
+          <b>${esc(r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}${pendingOf(r)}<br>${esc(r.reason)}
           <input id="ln_${r.id}" placeholder="${esc(t("managerNote"))}">
           <p><button data-act="lv-ok" data-id="${r.id}">${t("approve")}</button>
           <button class="secondary" data-act="lv-no" data-id="${r.id}">${t("reject")}</button></p></div>`).join("")
           : `<p>${t("noRequests")}</p>`;
       } else {
         $("engLeaves").innerHTML = rows.length ? rows.map(r => `<div class="note">${r.from_day} → ${r.to_day}
-          <span class="badge ${r.status}">${t("ls_" + r.status)}</span><br>${esc(r.reason)}
+          <span class="badge ${r.status}">${t("ls_" + r.status)}</span>${pendingOf(r)}<br>${esc(r.reason)}
           ${r.manager_note ? `<br><i>${esc(r.manager_note)}</i>` : ""}</div>`).join("") : `<p>${t("noData")}</p>`;
       }
     }
 
-    // ================= Manager: day board + edit =================
+    // ================= Manager: day board + edit + delete =================
     async function loadBoard() {
       const day = $("boardDate").value;
       const [p, a] = await Promise.all([
@@ -218,9 +229,10 @@
       $("boardHead").innerHTML = "<tr>" + ["engineer", "status", "time", "reason", "approved", "actions"].map(c => `<th>${t(c)}</th>`).join("") + "</tr>";
       $("boardBody").innerHTML = people.map(u => {
         const r = dayRows.find(x => x.user_id === u.id);
-        return `<tr><td>${esc(u.full_name)}</td><td>${badge(r?.status)}</td><td>${r?.checked_at ? clock(r.checked_at) : ""}</td>
+        return `<tr><td>${esc(u.full_name)}</td><td>${badge(r?.status)}</td><td>${timeCell(r)}</td>
           <td>${esc(r?.reason)}</td><td>${r?.approved ? "✓" : ""}</td>
-          <td>${MGR ? `<button class="secondary" data-act="edit" data-u="${u.id}">${t("edit")}</button>` : ""}</td></tr>`;
+          <td>${MGR ? `<button class="secondary" data-act="edit" data-u="${u.id}">${t("edit")}</button>` +
+            (r ? ` <button class="secondary" data-act="adel" data-u="${u.id}">${t("del")}</button>` : "") : ""}</td></tr>`;
       }).join("") || `<tr><td colspan="6">${t("noData")}</td></tr>`;
     }
     $("boardDate").onchange = loadBoard;
@@ -270,11 +282,13 @@
         const mine = a.data.filter(r => r.user_id === u.id);
         const row = { [t("engineer")]: u.full_name };
         STATUSES.forEach(s => (row[t("st_" + s)] = mine.filter(r => r.status === s).length));
+        row[t("lateMin")] = mine.reduce((s, r) => s + lateMins(r), 0);
         return row;
       });
       const daily = a.data.map(r => ({
         [t("date")]: r.day, [t("engineer")]: name[r.user_id] || "", [t("status")]: t("st_" + r.status),
-        [t("time")]: r.checked_at ? clock(r.checked_at) : "", [t("reason")]: r.reason || "", [t("approved")]: r.approved ? t("yes") : "",
+        [t("time")]: r.checked_at ? clock(r.checked_at) : "", [t("lateMin")]: lateMins(r) || "",
+        [t("reason")]: r.reason || "", [t("approved")]: r.approved ? t("yes") : "",
       }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), t("summary"));
@@ -303,7 +317,12 @@
       const act = b.dataset.act;
       try {
         if (act === "edit") return openEdit(b.dataset.u);
-        if (act === "lv-ok" || act === "lv-no") {
+        if (act === "adel") {
+          if (!confirm(t("confirmDelete"))) return;
+          const { error } = await db.from("attendance").delete().eq("user_id", b.dataset.u).eq("day", $("boardDate").value);
+          if (error) throw error;
+          loadBoard();
+        } else if (act === "lv-ok" || act === "lv-no") {
           const id = b.dataset.id;
           const { error } = await db.rpc("decide_leave", { p_id: id, p_approve: act === "lv-ok", p_note: $("ln_" + id).value });
           if (error) throw error;

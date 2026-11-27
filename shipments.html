@@ -52,7 +52,9 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
+  <script src="js/i18n-round1.js"></script>
   <script src="js/common.js"></script>
+  <script src="js/timer.js"></script>
   <script>
     const $ = id => document.getElementById(id);
     const TZ = "Africa/Addis_Ababa";
@@ -63,6 +65,7 @@
       ["voucher_no", "voucher", "text"], ["plate_no", "plate", "text"],
       ["from_place", "from", "text", true], ["to_place", "to", "text", true], ["item_type", "itemType", "text", true],
       ["quantity", "quantity", "number"], ["amount", "amount", "number"],
+      ["pay_source", "paySource", "select"],   // self pay or petty cash
     ];
     const PALETTE = ["#5081bc", "#25b36a", "#f0b429", "#ea6a6a", "#8e6ed8", "#3bbfae", "#e58a3c", "#7a8aa0"];
     let ME, VIEW, ADMIN, rows = [], engineers = [], editingId = null, charts = [];
@@ -70,6 +73,7 @@
     const msg = (text, ok) => { $("msg").textContent = text || ""; $("msg").className = "msg" + (ok ? " ok" : ""); };
     const fmt = n => Number(n).toLocaleString();
     const senderOf = r => r.sender_name || r.profiles?.full_name || "";
+    const payLabel = r => t("pay_" + (r.pay_source || "self"));
 
     (async () => {
       const auth = await requireLogin();
@@ -82,8 +86,9 @@
         engineers = (eng || []).filter(e => e.id !== ME.id);
         const receiverBox = `<div><label for="f_receiver_id">${t("receiverEng")}</label><select id="f_receiver_id">
           <option value="">${t("selectOne")}</option>${engineers.map(e => `<option value="${e.id}">${esc(e.full_name)}</option>`).join("")}</select></div>`;
-        $("fields").innerHTML = receiverBox + FIELDS.map(([k, l, type]) =>
-          `<div><label for="f_${k}">${t(l)}</label><input id="f_${k}" type="${type}" ${type === "number" ? 'min="0" step="any" inputmode="decimal"' : ""}></div>`).join("");
+        $("fields").innerHTML = receiverBox + FIELDS.map(([k, l, type]) => type === "select"
+          ? `<div><label for="f_${k}">${t(l)}</label><select id="f_${k}"><option value="self">${t("pay_self")}</option><option value="petty_cash">${t("pay_petty_cash")}</option></select></div>`
+          : `<div><label for="f_${k}">${t(l)}</label><input id="f_${k}" type="${type}" ${type === "number" ? 'min="0" step="any" inputmode="decimal"' : ""}></div>`).join("");
         resetForm();
       }
       if (VIEW) {
@@ -98,6 +103,7 @@
       editingId = null;
       $("f_receiver_id").value = "";
       FIELDS.forEach(([k]) => ($("f_" + k).value = ""));
+      $("f_pay_source").value = "self";
       $("formTitle").textContent = t("newShipment");
       $("saveBtn").textContent = t("save");
       $("cancelBtn").textContent = t("cancel");
@@ -132,7 +138,7 @@
         if (ADMIN) $("alert").insertAdjacentHTML("afterbegin", `<div class="ro-note">${t("viewOnly")}</div>`);
       }
 
-      const cols = ["#", "dateTime", "sender", "receiver", "from", "to", "itemType", "quantity", "amount", "plate", "voucher", "status"].concat(ADMIN ? [] : ["actions"]);
+      const cols = ["#", "dateTime", "sender", "receiver", "from", "to", "itemType", "quantity", "amount", "paySource", "plate", "voucher", "status"].concat(ADMIN ? [] : ["actions"]);
       $("thead").innerHTML = "<tr>" + cols.map(c => `<th>${c === "#" ? "#" : t(c)}</th>`).join("") + "</tr>";
 
       $("tbody").innerHTML = rows.length ? rows.map(r => {
@@ -141,12 +147,14 @@
         const canReceive = r.status === "sent" && (mgr || r.receiver_id === ME.id || (!r.receiver_id && r.engineer_id === ME.id));
         if (canReceive) buttons.push(`<button data-act="recv" data-id="${r.id}">${t("markReceived")}</button>`);
         if (mgr) buttons.push(`<button class="secondary" data-act="edit" data-id="${r.id}">${t("edit")}</button>`, `<button class="secondary" data-act="del" data-id="${r.id}">${t("del")}</button>`);
+        // Pending timer counts from the time the item was sent, until it is received
+        const timer = r.status === "received" ? "" : pendingBadge(r.sent_at);
         return `<tr>
           <td>${r.serial_no}</td><td>${esc(new Date(r.sent_at).toLocaleString(getLang() === "am" ? "am-ET" : "en-GB"))}</td>
           <td>${esc(senderOf(r))}</td><td>${esc(r.receiver_name)}</td>
           <td>${esc(r.from_place)}</td><td>${esc(r.to_place)}</td><td>${esc(r.item_type)}</td><td>${r.quantity}</td>
-          <td>${fmt(r.amount)}</td><td>${esc(r.plate_no)}</td><td>${esc(r.voucher_no)}</td>
-          <td><span class="badge ${r.status}">${statusLabel(r)}</span></td>${ADMIN ? "" : `<td>${buttons.join("")}</td>`}</tr>`;
+          <td>${fmt(r.amount)}</td><td>${esc(payLabel(r))}</td><td>${esc(r.plate_no)}</td><td>${esc(r.voucher_no)}</td>
+          <td><span class="badge ${r.status}">${statusLabel(r)}</span>${timer}</td>${ADMIN ? "" : `<td>${buttons.join("")}</td>`}</tr>`;
       }).join("") : `<tr><td colspan="${cols.length}">${t("noData")}</td></tr>`;
     }
 
@@ -179,9 +187,12 @@
     $("rXls").onclick = () => {
       const R = rows.filter(inRange);
       const status = r => (r.status === "received" ? t("received") : t("pendingCount"));
+      const paid = src => R.filter(r => (r.pay_source || "self") === src).reduce((s, r) => s + Number(r.amount), 0);
       const sum = [
         { [t("sheetSummary")]: t("totalShipments"), [t("count")]: R.length },
         { [t("sheetSummary")]: t("totalAmount"), [t("count")]: R.reduce((s, r) => s + Number(r.amount), 0) },
+        { [t("sheetSummary")]: t("selfTotal"), [t("count")]: paid("self") },
+        { [t("sheetSummary")]: t("pettyTotal"), [t("count")]: paid("petty_cash") },
         { [t("sheetSummary")]: t("receivedCount"), [t("count")]: R.filter(r => r.status === "received").length },
         { [t("sheetSummary")]: t("pendingCount"), [t("count")]: R.filter(r => r.status !== "received").length },
       ];
@@ -192,7 +203,7 @@
       const details = R.map(r => ({
         "#": r.serial_no, [t("dateTime")]: new Date(r.sent_at).toLocaleString("en-GB", { timeZone: TZ }), [t("sender")]: senderOf(r), [t("receiver")]: r.receiver_name || "",
         [t("from")]: r.from_place, [t("to")]: r.to_place, [t("itemType")]: r.item_type, [t("quantity")]: r.quantity,
-        [t("amount")]: Number(r.amount), [t("plate")]: r.plate_no || "", [t("voucher")]: r.voucher_no || "", [t("status")]: status(r),
+        [t("amount")]: Number(r.amount), [t("paySource")]: payLabel(r), [t("plate")]: r.plate_no || "", [t("voucher")]: r.voucher_no || "", [t("status")]: status(r),
       }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sum), t("sheetSummary"));
@@ -238,6 +249,7 @@
         editingId = id;
         $("f_receiver_id").value = row.receiver_id || "";
         FIELDS.forEach(([k]) => ($("f_" + k).value = row[k] ?? ""));
+        if (!$("f_pay_source").value) $("f_pay_source").value = "self";
         $("formTitle").textContent = t("editShipment");
         $("saveBtn").textContent = t("update");
         $("cancelBtn").hidden = false;
