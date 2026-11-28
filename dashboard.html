@@ -8,18 +8,16 @@
   <meta name="theme-color" content="#3a68a3">
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body class="dash">
   <header id="header"></header>
   <main>
-    <div class="card"><h2 id="hello"></h2><div id="roNote"></div><div id="todayBox"></div></div>
-    <div class="kpis" id="kpis"></div>
-    <div class="charts">
-      <div class="card"><h2 id="c1Title"></h2><div class="chart-box"><canvas id="c1"></canvas></div></div>
-      <div class="card" id="c2Card"><h2 id="c2Title"></h2><div class="chart-box"><canvas id="c2"></canvas></div></div>
+    <div id="roNote"></div>
+    <div class="dash-top">
+      <section class="card" id="todayCard"><div id="todayTop"></div>
+        <p class="mini-title" id="c1Title"></p><div class="chart-box short"><canvas id="c1"></canvas></div></section>
+      <section class="card" id="attnCard"></section>
     </div>
-    <div class="card"><p>
-      <a href="attendance.html"><button data-t="goAttendance"></button></a>
-      <a href="shipments.html"><button class="secondary" data-t="goShipments"></button></a></p></div>
+    <section class="card" id="c2Card"><div class="card-head"><h2 id="c2Title"></h2><span class="muted" id="c2Sub"></span></div><div class="chart-box short"><canvas id="c2"></canvas></div></section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -27,15 +25,19 @@
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/common.js"></script>
+  <script src="js/timer.js"></script>
   <script>
     const $ = id => document.getElementById(id);
     const TZ = "Africa/Addis_Ababa";
     const dayOf = ts => new Date(ts).toLocaleDateString("en-CA", { timeZone: TZ });
     const todayStr = () => dayOf(new Date());
     const addDays = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-    const COLORS = { ready: "#25b36a", late: "#f0b429", absent: "#ea6a6a", leave: "#5b8fd0", field: "#8e6ed8", dayoff: "#b8c2d0" };
-    const kpi = (id, label) => `<div class="kpi"><div class="num" id="${id}">0</div><div class="lbl">${label}</div></div>`;
-    const count = q => q.then(r => r.count || 0, () => 0);
+    const COLORS = { ready: "#22a565", late: "#e8a317", absent: "#e05a5a", leave: "#5b8fd0", field: "#8e6ed8", none: "#c3ccd8" };
+    const STATUS = ["ready", "late", "absent", "leave", "field"];
+    const ICON = { ready: "✓", late: "⏰", absent: "✕", leave: "🌴", field: "🛠", none: "…", ship: "📦", spare: "🔧", leaveReq: "📝" };
+    const fmt = n => Number(n || 0).toLocaleString();
+    const listOf = r => r.data || [];
+    const countOf = r => r.count ?? (r.data || []).length;
     let ME;
 
     (async () => {
@@ -44,47 +46,97 @@
       ME = auth.profile;
       renderHeader(ME); translatePage();
       Chart.defaults.font.family = "system-ui, 'Noto Sans Ethiopic', sans-serif";
-      Chart.defaults.animation = { duration: 1200, easing: "easeOutQuart" };
-      $("hello").textContent = t("welcome") + ", " + ME.full_name;
+      Chart.defaults.animation = { duration: 900, easing: "easeOutQuart" };
+      Chart.defaults.plugins.legend.labels.usePointStyle = true;
+      Chart.defaults.plugins.legend.labels.boxWidth = 8;
+      greet();
       await db.rpc("sync_attendance");
       canView(ME) ? loadOverview() : loadMine();
     })();
+
+    // Banner: "Good morning, Kaleab" + today's date
+    function greet(extra = "") {
+      const h = Number(new Date().toLocaleString("en-US", { timeZone: TZ, hour: "numeric", hour12: false })) % 24;
+      const hi = t(h < 12 ? "goodMorning" : h < 18 ? "goodAfternoon" : "goodEvening");
+      const date = new Date().toLocaleDateString(getLang() === "am" ? "am-ET" : "en-GB", { timeZone: TZ, weekday: "long", day: "numeric", month: "long" });
+      const hero = document.querySelector(".hero");
+      if (!hero) return;
+      hero.querySelector("h1").textContent = hi + ", " + ME.full_name.split(" ")[0];
+      hero.querySelector("p").innerHTML = esc(date) + extra;
+    }
+
+    // One line in the "Needs attention" box
+    const attnRow = (icon, label, n, href) => `<a class="attn-row${n ? " hot" : ""}" href="${href}">
+      <span class="ico">${icon}</span><span class="txt">${label}</span><span class="cnt">${n}</span><span class="go">›</span></a>`;
+    const what = r => (r.item_type || "—") + (r.quantity ? " × " + r.quantity : "");
+    const route = r => (r.from_place || r.to_place) ? (r.from_place || "?") + " → " + (r.to_place || "?") : "";
+    const attnItem = (title, sub, since) => `<li><div><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>${pendingBadge(since)}</li>`;
 
     // ---------- Manager / admin ----------
     async function loadOverview() {
       if (ME.role === "admin") $("roNote").innerHTML = `<div class="ro-note">${t("viewOnly")}</div>`;
       const today = todayStr(), d7 = addDays(today, -6), d14 = addDays(today, -13);
-      const [att, ship, pend, leaves] = await Promise.all([
-        db.from("attendance").select("day, status").gte("day", d7),
-        db.from("shipments").select("amount, sent_at").gte("sent_at", d14 + "T00:00:00Z"),
-        count(db.from("shipments").select("id", { count: "exact", head: true }).eq("status", "sent")),
-        count(db.from("leave_requests").select("id", { count: "exact", head: true }).eq("status", "pending")),
+      const [att, ship, eng, pShip, pSpare, pLeave] = await Promise.all([
+        db.from("attendance").select("user_id, day, status").gte("day", d7),
+        db.from("shipments").select("amount, sent_at").gte("sent_at", d14 + "T00:00:00+03:00"),
+        db.from("profiles").select("id").eq("role", "engineer").eq("active", true),
+        db.from("shipments").select("item_type, quantity, from_place, to_place, sent_at", { count: "exact" }).eq("status", "sent").order("sent_at").limit(3),
+        db.from("spare_requests").select("item_type, quantity, requester_name, requested_at", { count: "exact" }).eq("status", "pending").order("requested_at").limit(3),
+        db.from("leave_requests").select("id", { count: "exact", head: true }).eq("status", "pending"),
       ]);
-      const A = att.data || [], S = ship.data || [];
-      const nowRows = A.filter(r => r.day === today);
-      const c = s => nowRows.filter(r => r.status === s).length;
-      $("kpis").innerHTML = kpi("k1", t("kpiPresent")) + kpi("k2", t("kpiLate")) + kpi("k3", t("kpiAbsent")) +
-        kpi("k4", t("kpiAway")) + kpi("k5", t("kpiPendingShip")) + kpi("k6", t("kpiLeaveReq"));
-      [c("ready"), c("late"), c("absent"), c("leave") + c("field"), pend, leaves].forEach((v, i) => countUp($("k" + (i + 1)), v));
+      const A = listOf(att), S = listOf(ship), engIds = new Set(listOf(eng).map(p => p.id));
+      const todayRows = A.filter(r => r.day === today && (!engIds.size || engIds.has(r.user_id)));
+      const total = engIds.size || todayRows.length;
+      const c = s => todayRows.filter(r => r.status === s).length;
+      const counts = { ready: c("ready"), late: c("late"), absent: c("absent"), away: c("leave") + c("field") };
+      counts.none = Math.max(0, total - todayRows.length);
+      greet(` · <b>${esc(t("readyOfTotal", { a: counts.ready, b: total }))}</b>`);
+
+      // Team today: one bar split by status + the numbers under it
+      const parts = [["ready", counts.ready, "kpiPresent"], ["late", counts.late, "kpiLate"], ["absent", counts.absent, "kpiAbsent"],
+                     ["leave", counts.away, "kpiAway"], ["none", counts.none, "kpiNotYet"]];
+      $("todayTop").innerHTML = `<div class="card-head"><h2>${t("teamToday")}</h2><span class="muted">${t("engineersN", { n: total })}</span></div>
+        <div class="split">${parts.map(([k, n]) => n ? `<i style="flex:${n};background:${COLORS[k]}" title="${esc(t(k === "none" ? "kpiNotYet" : "st_" + k))}: ${n}"></i>` : "").join("") || `<i style="flex:1;background:${COLORS.none}"></i>`}</div>
+        <div class="stats">${parts.map(([k, n, lbl]) => `<div class="stat"><span class="dot" style="background:${COLORS[k]}">${ICON[k]}</span>
+          <div><b data-n="${n}">0</b><small>${t(lbl)}</small></div></div>`).join("")}</div>`;
+      document.querySelectorAll("#todayTop [data-n]").forEach(el => countUp(el, Number(el.dataset.n)));
+
+      // Needs attention: what is waiting, with the oldest items and their waiting time
+      const nShip = countOf(pShip), nSpare = countOf(pSpare), nLeave = pLeave.count || 0;
+      const oldest = listOf(pShip).map(r => [what(r), route(r), r.sent_at])
+        .concat(listOf(pSpare).map(r => [what(r), r.requester_name || "", r.requested_at]))
+        .sort((a, b) => new Date(a[2]) - new Date(b[2])).slice(0, 3);
+      $("attnCard").innerHTML = `<div class="card-head"><h2>${t("needsAttention")}</h2></div>
+        ${attnRow(ICON.ship, t("shipWaiting"), nShip, "shipments.html")}
+        ${attnRow(ICON.spare, t("spareWaiting"), nSpare, "spare.html")}
+        ${attnRow(ICON.leaveReq, t("leaveWaiting"), nLeave, "attendance.html")}
+        ${oldest.length ? `<p class="mini-title">${t("oldestWaiting")}</p><ul class="attn-list">${oldest.map(o => attnItem(...o)).join("")}</ul>`
+          : (nShip + nSpare + nLeave ? "" : `<p class="all-clear">✓ ${t("allClear")}</p>`)}`;
 
       // Chart 1: attendance, last 7 days (stacked)
       const days7 = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
+      const dayLbl = d => new Date(d + "T12:00:00Z").toLocaleDateString(getLang() === "am" ? "am-ET" : "en-GB", innerWidth < 500 ? { weekday: "narrow" } : { weekday: "short", day: "numeric" });
       $("c1Title").textContent = t("att7");
       new Chart($("c1"), {
         type: "bar",
-        data: { labels: days7.map(d => d.slice(5)), datasets: ["ready", "late", "absent", "leave", "field"].map(s => ({
-          label: t("st_" + s), backgroundColor: COLORS[s], borderRadius: 4, data: days7.map(d => A.filter(r => r.day === d && r.status === s).length) })) },
-        options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } },
+        data: { labels: days7.map(dayLbl), datasets: STATUS.map(s => ({
+          label: t("st_" + s), backgroundColor: COLORS[s], borderRadius: 6, borderSkipped: false, maxBarThickness: 34,
+          data: days7.map(d => A.filter(r => r.day === d && r.status === s).length) })) },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom" } },
+          scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 6 } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, border: { display: false } } } },
       });
 
-      // Chart 2: shipments amount, last 14 days
+      // Chart 2: money sent per day, last 14 days
       const days14 = Array.from({ length: 14 }, (_, i) => addDays(today, i - 13));
-      $("c2Title").textContent = t("ship14");
+      const perDay = days14.map(d => S.filter(r => dayOf(r.sent_at) === d).reduce((s, r) => s + Number(r.amount), 0));
+      $("c2Title").textContent = t("shipments");
+      $("c2Sub").textContent = t("birrIn14", { n: fmt(perDay.reduce((a, b) => a + b, 0)) });
       new Chart($("c2"), {
-        type: "line",
-        data: { labels: days14.map(d => d.slice(5)), datasets: [{ label: t("amount"), borderColor: "#3a68a3", backgroundColor: "rgba(80,129,188,.25)",
-          fill: true, tension: .35, pointRadius: 3, data: days14.map(d => S.filter(r => dayOf(r.sent_at) === d).reduce((s, r) => s + Number(r.amount), 0)) }] },
-        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } },
+        type: "bar",
+        data: { labels: days14.map(d => d.slice(8)), datasets: [{ label: t("amount"), data: perDay, borderRadius: 6, maxBarThickness: 22,
+          backgroundColor: days14.map(d => d === today ? "#3a68a3" : "rgba(80,129,188,.45)") }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+          scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 4 } }, y: { beginAtZero: true, border: { display: false } } } },
       });
     }
 
@@ -94,22 +146,34 @@
       const [rec, mine, toRec, sent] = await Promise.all([
         db.from("attendance").select("status").eq("user_id", ME.id).eq("day", today).maybeSingle(),
         db.from("attendance").select("status").eq("user_id", ME.id).gte("day", m1),
-        count(db.from("shipments").select("id", { count: "exact", head: true }).eq("receiver_id", ME.id).eq("status", "sent")),
-        count(db.from("shipments").select("id", { count: "exact", head: true }).eq("engineer_id", ME.id)),
+        db.from("shipments").select("item_type, quantity, from_place, to_place, sent_at", { count: "exact" }).eq("receiver_id", ME.id).eq("status", "sent").order("sent_at").limit(3),
+        db.from("shipments").select("id", { count: "exact", head: true }).eq("engineer_id", ME.id),
       ]);
       const st = rec.data?.status;
-      $("todayBox").innerHTML = `<p>${t("myStatus")}: <span class="badge ${st || ""}">${t(st ? "st_" + st : "st_none")}</span></p>`;
-      const M = mine.data || [];
-      $("kpis").innerHTML = kpi("k1", t("st_ready")) + kpi("k2", t("st_late")) + kpi("k3", t("st_absent")) + kpi("k5", t("toReceive")) + kpi("k6", t("mySent"));
-      const c = s => M.filter(r => r.status === s).length;
-      [["k1", c("ready")], ["k2", c("late")], ["k3", c("absent")], ["k5", toRec], ["k6", sent]].forEach(([id, v]) => countUp($(id), v));
+      greet(` · <span class="badge ${st || ""}">${t(st ? "st_" + st : "st_none")}</span>` +
+        (st ? "" : ` <a class="hero-btn" href="attendance.html">${t("markNow")}</a>`));
+
+      // This month: numbers + doughnut
+      const M = listOf(mine), c = s => M.filter(r => r.status === s).length;
+      $("todayTop").innerHTML = `<div class="card-head"><h2>${t("thisMonth")}</h2></div>
+        <div class="stats">${STATUS.map(s => `<div class="stat"><span class="dot" style="background:${COLORS[s]}">${ICON[s]}</span>
+          <div><b data-n="${c(s)}">0</b><small>${t("st_" + s)}</small></div></div>`).join("")}</div>`;
+      document.querySelectorAll("#todayTop [data-n]").forEach(el => countUp(el, Number(el.dataset.n)));
+
+      // My shipments: what waits for me + how many I sent
+      const nRec = countOf(toRec);
+      $("attnCard").innerHTML = `<div class="card-head"><h2>${t("myShipments")}</h2></div>
+        ${attnRow(ICON.ship, t("forMe"), nRec, "shipments.html")}
+        ${attnRow("📤", t("mySent"), sent.count || 0, "shipments.html").replace(" hot", "")}
+        ${nRec ? `<ul class="attn-list">${listOf(toRec).map(r => attnItem(what(r), route(r), r.sent_at)).join("")}</ul>`
+          : `<p class="all-clear">✓ ${t("allClear")}</p>`}`;
+
       $("c2Card").hidden = true;
       $("c1Title").textContent = t("myMonth");
-      const keys = ["ready", "late", "absent", "leave", "field"];
       new Chart($("c1"), {
         type: "doughnut",
-        data: { labels: keys.map(s => t("st_" + s)), datasets: [{ data: keys.map(c), backgroundColor: keys.map(s => COLORS[s]), borderWidth: 2 }] },
-        options: { responsive: true, maintainAspectRatio: false, cutout: "62%", animation: { animateRotate: true, duration: 1400 } },
+        data: { labels: STATUS.map(s => t("st_" + s)), datasets: [{ data: STATUS.map(c), backgroundColor: STATUS.map(s => COLORS[s]), borderWidth: 0, spacing: 2 }] },
+        options: { responsive: true, maintainAspectRatio: false, cutout: "68%", plugins: { legend: { position: "bottom" } }, animation: { animateRotate: true, duration: 1100 } },
       });
     }
   </script>

@@ -2,6 +2,7 @@
 // Round-3 words, the machine drawings and the modern look are loaded here, so every page gets them.
 if (!window.__r1) document.write('<script src="js/i18n-round1.js"><\/script>');
 if (!window.__r3) document.write('<script src="js/i18n-round3.js"><\/script>');
+if (!window.__ui) document.write('<script src="js/i18n-ui.js"><\/script>');
 if (typeof ART === "undefined") document.write('<script src="js/art.js"><\/script>');
 document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="css/modern.css">');
 
@@ -83,10 +84,13 @@ function renderHeader(profile) {
       <img src="img/logo-small.jpg" alt="Moti">
       <b>${t("appName")}</b>
       <a class="who" href="profile.html">${avatar(profile)}<span>${esc(profile.full_name)}${profile.role === "admin" ? ` <span class="role-pill">${t("admin")}</span>` : ""}</span></a>
-      <button id="themeBtn" class="secondary" aria-label="${esc(t("theme"))}">${THEME.get() === "dark" ? "☀️" : "🌙"}</button>
       <button id="bellBtn" class="secondary" aria-label="${esc(t("notifications"))}">🔔<span id="bellN"></span></button>
-      <select id="langSel"><option value="en">English</option><option value="am">አማርኛ</option></select>
-      <button id="logoutBtn" class="secondary">${t("logout")}</button>
+      <button id="moreBtn" class="secondary" aria-label="${esc(t("more"))}" aria-expanded="false">⋯</button>
+      <div class="bar-extra" id="barExtra">
+        <button id="themeBtn" class="secondary" aria-label="${esc(t("theme"))}">${THEME.get() === "dark" ? "☀️" : "🌙"}</button>
+        <select id="langSel" aria-label="Language"><option value="en">English</option><option value="am">አማርኛ</option></select>
+        <button id="logoutBtn" class="secondary">${t("logout")}</button>
+      </div>
     </div>
     <div id="notePanel" class="panel" hidden></div>
     <nav>${links.map(([h, k]) => `<a href="${h}" class="${h === page ? "active" : ""}">${t(k)}</a>`).join("")}</nav>
@@ -98,6 +102,11 @@ function renderHeader(profile) {
   document.getElementById("bellBtn").onclick = toggleBell;
   document.getElementById("themeBtn").onclick = () => THEME.set(THEME.get() === "dark" ? "light" : "dark");
   document.getElementById("notePanel").onclick = onNoteClick;
+  // Phone: theme / language / logout live behind the ⋯ button
+  const more = document.getElementById("moreBtn"), bar = more.closest(".bar");
+  more.onclick = () => { const o = bar.classList.toggle("open"); more.setAttribute("aria-expanded", o); };
+  // Phone: scroll the menu so the open page is visible
+  const act = document.querySelector("nav a.active"); if (act) act.scrollIntoView({ block: "nearest", inline: "center" });
   // Marks holidays / absent / late for everyone, then loads the messages
   db.rpc("sync_attendance").then(refreshBell, refreshBell);
   setInterval(refreshBell, 30000);   // new messages (spare-part answers, "received") pop up without reloading
