@@ -53,7 +53,7 @@
     const PALETTE = ["#5081bc", "#25b36a", "#f0b429", "#ea6a6a", "#8e6ed8", "#3bbfae", "#e58a3c", "#7a8aa0"];
     const kpi = (id, label, sfx = "") => `<div class="kpi"><div class="num"><span id="${id}">0</span>${sfx}</div><div class="lbl">${label}</div></div>`;
     const tally = (list, keyFn, valFn = () => 1) => { const o = {}; list.forEach(r => { const k = keyFn(r) || "-"; o[k] = (o[k] || 0) + Number(valFn(r) || 0); }); return o; };
-    const top = (o, n) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n);
+    const topN = (o, n) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n);
     let ME, charts = [], DATA = {};
 
     (async () => {
@@ -101,9 +101,9 @@
       mk("c3", { type: "doughnut", data: { labels: Object.keys(pay), datasets: [{ data: Object.values(pay), backgroundColor: PALETTE, borderWidth: 2 }] }, options: { cutout: "58%" } });
       const bar = (id, pairs, color) => mk(id, { type: "bar", data: { labels: pairs.map(p => p[0]), datasets: [{ data: pairs.map(p => p[1]), backgroundColor: color, borderRadius: 4 }] },
         options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } } });
-      bar("c4", top(tally(R, r => r.bank), 8), "#8e6ed8");
-      bar("c5", top(tally(R, r => r.item_type, r => r.quantity), 8), "#3bbfae");
-      bar("c6", top(tally(R, r => r.requester_name), 8), "#e58a3c");
+      bar("c4", topN(tally(R, r => r.bank), 8), "#8e6ed8");
+      bar("c5", topN(tally(R, r => r.item_type, r => r.quantity), 8), "#3bbfae");
+      bar("c6", topN(tally(R, r => r.requester_name), 8), "#e58a3c");
 
       const list = (rows, whoFn, textFn, tsFn) => rows.length ? rows.map(r => `<div class="note"><b>${esc(whoFn(r))}</b> · ${esc(textFn(r))} ${pendingBadge(tsFn(r))}</div>`).join("") : `<p class="muted">${t("noPending")}</p>`;
       $("pShip").innerHTML = list(DATA.pShip, r => (r.sender_name || name[r.engineer_id] || "") + " → " + (r.receiver_name || ""), r => `${r.item_type} x ${r.quantity}`, r => r.sent_at);
