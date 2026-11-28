@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Performance - Moti DD ERP</title>
+  <link rel="icon" href="img/logo-small.jpg">
+  <meta name="theme-color" content="#3a68a3">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="header"></header>
+  <main>
+    <div class="card">
+      <h2 data-t="performance"></h2>
+      <p class="muted" data-t="scoreRule"></p>
+      <div class="grid">
+        <div><label for="pMode" data-t="period"></label><select id="pMode"></select></div>
+        <div id="wBox"><label for="pDate" data-t="date"></label><input id="pDate" type="date"></div>
+        <div id="mBox" hidden><label for="pMonth" data-t="monthly"></label><input id="pMonth" type="month"></div>
+      </div>
+      <p><button id="xlsBtn" data-t="download"></button></p>
+      <div id="rangeLine" class="muted"></div>
+    </div>
+
+    <div class="card"><div class="table-wrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div></div>
+
+    <div class="card" id="adjCard" hidden>
+      <h2 data-t="adjustments"></h2>
+      <div id="mgrForms">
+        <div class="grid">
+          <div><label for="limit" data-t="weekLimit"></label><input id="limit" type="number" min="0" max="100"></div>
+          <div><label>&nbsp;</label><button id="limitBtn" class="secondary" data-t="saveLimit"></button></div>
+        </div>
+        <div class="grid">
+          <div><label for="aEng" data-t="engineer"></label><select id="aEng"></select></div>
+          <div><label for="aDate" data-t="date"></label><input id="aDate" type="date"></div>
+          <div><label for="aPts" data-t="adjPoints"></label><input id="aPts" type="number" step="0.5" min="-100" max="100"></div>
+          <div><label for="aWhy" data-t="adjReason"></label><input id="aWhy"></div>
+        </div>
+        <p><button id="aAdd" data-t="addAdj"></button></p>
+      </div>
+      <div id="adjMsg" class="msg"></div>
+      <div class="table-wrap"><table><tbody id="adjBody"></tbody></table></div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/i18n-round1.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const TZ = "Africa/Addis_Ababa";
+    const todayStr = () => new Date().toLocaleDateString("en-CA", { timeZone: TZ });
+    const addDays = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const clock = ts => new Date(ts).toLocaleTimeString("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
+    // minutes after 2:30 Ethiopian morning time (8:30 clock) when a late engineer pressed "ready"
+    const lateMins = r => { if (r.status !== "late" || !r.checked_at) return 0; const [h, m] = clock(r.checked_at).split(":").map(Number); return Math.max(0, h * 60 + m - 510); };
+    const msg = (text, ok) => { $("adjMsg").textContent = text || ""; $("adjMsg").className = "msg" + (ok ? " ok" : ""); };
+    let ME, MGR, VIEW, LIMIT = 3, ADJ_OK = true, people = [], result = [], adjRows = [], range = {};
+
+    (async () => {
+      const auth = await requireLogin(); if (!auth) return;
+      ME = auth.profile; MGR = isManager(ME); VIEW = canView(ME);
+      renderHeader(ME); translatePage();
+      $("pMode").innerHTML = `<option value="week">${t("weekly")}</option><option value="month">${t("monthly")}</option>`;
+      $("pDate").value = $("aDate").value = todayStr(); $("pMonth").value = todayStr().slice(0, 7);
+      if (VIEW) { $("adjCard").hidden = false; $("mgrForms").hidden = !MGR; }
+      const { data: s } = await db.from("performance_settings").select("weekly_spare_request_limit").maybeSingle();
+      if (s) LIMIT = s.weekly_spare_request_limit;
+      $("limit").value = LIMIT;
+      load();
+    })();
+
+    function getRange() {
+      if ($("pMode").value === "month") {
+        const m = $("pMonth").value, [y, mo] = m.split("-").map(Number);
+        return { from: m + "-01", to: new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10) };
+      }
+      const d = new Date($("pDate").value + "T00:00:00Z"), from = addDays($("pDate").value, -((d.getUTCDay() + 1) % 7));   // back to Saturday
+      return { from, to: addDays(from, 6) };
+    }
+
+    async function load() {
+      range = getRange();
+      $("wBox").hidden = $("pMode").value === "month"; $("mBox").hidden = $("pMode").value !== "month";
+      $("rangeLine").textContent = range.from + " → " + range.to;
+      const days = (new Date(range.to) - new Date(range.from)) / 86400000 + 1;
+      const allowed = Math.round(LIMIT * days / 7);          // free spare requests in this period
+      const [p, a, s, adj] = await Promise.all([
+        db.from("profiles").select("id, full_name").eq("role", "engineer").eq("active", true).order("full_name"),
+        db.from("attendance").select("*").gte("day", range.from).lte("day", range.to),
+        db.from("spare_requests").select("requester_id, requested_at").gte("requested_at", range.from + "T00:00:00+03:00").lte("requested_at", range.to + "T23:59:59+03:00"),
+        db.from("performance_adjustments").select("*").gte("adjustment_date", range.from).lte("adjustment_date", range.to).order("adjustment_date", { ascending: false }),
+      ]);
+      ADJ_OK = !adj.error; adjRows = adj.data || [];
+      people = (p.data && p.data.length) ? p.data : (ME.role === "engineer" ? [{ id: ME.id, full_name: ME.full_name }] : []);
+      result = people.map(u => {
+        const A = (a.data || []).filter(r => r.user_id === u.id);
+        const absent = A.filter(r => r.status === "absent").length, late = A.filter(r => r.status === "late").length;
+        const mins = A.reduce((x, r) => x + lateMins(r), 0);
+        const req = (s.data || []).filter(r => r.requester_id === u.id).length, extra = Math.max(0, req - allowed);
+        const adjPts = adjRows.filter(r => r.engineer_id === u.id).reduce((x, r) => x + Number(r.points), 0);
+        const score = Math.max(0, Math.min(100, 100 - 5 * absent - 2 * late - 2 * extra + adjPts));
+        return { name: u.full_name, absent, late, mins, req, extra, adjPts, score };
+      }).sort((x, y) => y.score - x.score);
+      render();
+    }
+
+    const label = s => s >= 90 ? t("excellent") : s >= 75 ? t("good") : s >= 60 ? t("fair") : t("low");
+    const cls = s => s >= 75 ? "" : s >= 60 ? "mid" : "low";
+    function render() {
+      $("thead").innerHTML = "<tr>" + ["rank", "engineer", "absentDays", "lateDays", "lateMin", "spareReq", "extraReq", "adjustments", "score"].map(c => `<th>${t(c)}</th>`).join("") + "</tr>";
+      $("tbody").innerHTML = result.length ? result.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${r.absent}</td><td>${r.late}</td><td>${r.mins}</td>
+        <td>${r.req}</td><td>${r.extra}</td><td>${r.adjPts > 0 ? "+" : ""}${r.adjPts}</td>
+        <td><span class="score-num">${r.score.toFixed(0)}%</span><small>${esc(label(r.score))}</small><div class="scorebar ${cls(r.score)}"><i style="width:${r.score}%"></i></div></td></tr>`).join("")
+        : `<tr><td colspan="9">${t("noData")}</td></tr>`;
+      $("aEng").innerHTML = people.map(u => `<option value="${u.id}">${esc(u.full_name)}</option>`).join("");
+      const name = Object.fromEntries(people.map(u => [u.id, u.full_name]));
+      $("adjBody").innerHTML = adjRows.length ? adjRows.map(r => `<tr><td>${r.adjustment_date}</td><td>${esc(name[r.engineer_id] || "")}</td><td>${r.points > 0 ? "+" : ""}${r.points}</td><td>${esc(r.reason)}</td>
+        <td>${MGR ? `<button class="secondary" data-del="${r.id}">${t("del")}</button>` : ""}</td></tr>`).join("") : `<tr><td colspan="5">${ADJ_OK ? t("noAdj") : t("perfNeedsSql")}</td></tr>`;
+    }
+
+    $("pMode").onchange = $("pDate").onchange = $("pMonth").onchange = load;
+
+    $("limitBtn").onclick = async () => {
+      const { error } = await db.rpc("set_weekly_spare_request_limit", { p_limit: Number($("limit").value) });
+      if (error) return msg(t("error") + " " + error.message);
+      LIMIT = Number($("limit").value); msg(t("saved"), true); load();
+    };
+    $("aAdd").onclick = async () => {
+      const pts = Number($("aPts").value), why = $("aWhy").value.trim();
+      if (!pts || !why || !$("aEng").value) return msg(t("fillRequired"));
+      const { error } = await db.rpc("add_performance_adjustment", { p_engineer_id: $("aEng").value, p_date: $("aDate").value, p_points: pts, p_reason: why });
+      if (error) return msg(t("error") + " " + error.message);
+      $("aPts").value = $("aWhy").value = ""; msg(t("saved"), true); load();
+    };
+    // Manager can delete manual points
+    $("adjBody").onclick = async e => {
+      const b = e.target.closest("button[data-del]");
+      if (!b || !confirm(t("confirmDelete"))) return;
+      const { error } = await db.from("performance_adjustments").delete().eq("id", b.dataset.del);
+      if (error) return msg(t("error") + " " + error.message);
+      load();
+    };
+
+    // Excel: the period that is on the screen (weekly or monthly)
+    $("xlsBtn").onclick = () => {
+      const rows = result.map((r, i) => ({ [t("rank")]: i + 1, [t("engineer")]: r.name, [t("absentDays")]: r.absent, [t("lateDays")]: r.late, [t("lateMin")]: r.mins,
+        [t("spareReq")]: r.req, [t("extraReq")]: r.extra, [t("adjustments")]: r.adjPts, [t("score")]: Number(r.score.toFixed(1)), ["*"]: label(r.score) }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), t("performance"));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ [t("period")]: range.from + " → " + range.to, [t("weekLimit")]: LIMIT, ["*"]: t("scoreRule") }]), t("summary"));
+      XLSX.writeFile(wb, `performance-${$("pMode").value}-${range.from}_${range.to}.xlsx`);
+    };
+  </script>
+</body>
+</html>

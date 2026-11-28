@@ -11,14 +11,8 @@ const isOld = ts => Date.now() - new Date(ts).getTime() >= 86400000;   // 24 hou
 function pendingBadge(ts) {
   return `<span class="pending-timer${isOld(ts) ? " old" : ""}" data-since="${esc(ts)}">⏳ ${pendingText(ts)}</span>`;
 }
-
-(function startTimers() {
-  const css = document.createElement("style");
-  css.textContent = `.pending-timer{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:999px;font-size:.78rem;font-weight:600;
-    background:#fff4d6;color:#8a5b00;white-space:nowrap}.pending-timer.old{background:#fde2e2;color:#b42318}`;
-  document.head.appendChild(css);
-  setInterval(() => document.querySelectorAll("[data-since]").forEach(el => {
-    el.textContent = "⏳ " + pendingText(el.dataset.since);
-    el.classList.toggle("old", isOld(el.dataset.since));
-  }), 30000);
-})();
+// Every badge on the page refreshes itself each 30 seconds (look of the badge: css/modern.css)
+setInterval(() => document.querySelectorAll("[data-since]").forEach(el => {
+  el.textContent = "⏳ " + pendingText(el.dataset.since);
+  el.classList.toggle("old", isOld(el.dataset.since));
+}), 30000);

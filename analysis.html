@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analysis - Moti DD ERP</title>
+  <link rel="icon" href="img/logo-small.jpg">
+  <meta name="theme-color" content="#3a68a3">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="header"></header>
+  <main>
+    <div class="card">
+      <h2 data-t="overall"></h2>
+      <div class="grid">
+        <div><label for="aFrom" data-t="fromDate"></label><input id="aFrom" type="date"></div>
+        <div><label for="aTo" data-t="toDate"></label><input id="aTo" type="date"></div>
+      </div>
+      <p><button id="xlsBtn" class="secondary" data-t="downloadAnalysis"></button></p>
+    </div>
+
+    <div class="kpis" id="kpis"></div>
+
+    <div class="charts">
+      <div class="card"><h2 data-t="attTrend"></h2><div class="chart-box"><canvas id="c1"></canvas></div></div>
+      <div class="card"><h2 data-t="chartAmountDay"></h2><div class="chart-box"><canvas id="c2"></canvas></div></div>
+      <div class="card"><h2 data-t="payMix"></h2><div class="chart-box"><canvas id="c3"></canvas></div></div>
+      <div class="card"><h2 data-t="byBank"></h2><div class="chart-box"><canvas id="c4"></canvas></div></div>
+      <div class="card"><h2 data-t="topItems"></h2><div class="chart-box"><canvas id="c5"></canvas></div></div>
+      <div class="card"><h2 data-t="perEngineer"></h2><div class="chart-box"><canvas id="c6"></canvas></div></div>
+    </div>
+
+    <div class="card"><h2 data-t="pendingShip"></h2><div id="pShip"></div></div>
+    <div class="card"><h2 data-t="pendingSpare"></h2><div id="pSpare"></div></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/i18n-round1.js"></script>
+  <script src="js/common.js"></script>
+  <script src="js/timer.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const TZ = "Africa/Addis_Ababa";
+    const dayOf = ts => new Date(ts).toLocaleDateString("en-CA", { timeZone: TZ });
+    const todayStr = () => dayOf(new Date());
+    const addDays = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const COLORS = { ready: "#25b36a", late: "#f0b429", absent: "#ea6a6a" };
+    const PALETTE = ["#5081bc", "#25b36a", "#f0b429", "#ea6a6a", "#8e6ed8", "#3bbfae", "#e58a3c", "#7a8aa0"];
+    const kpi = (id, label, sfx = "") => `<div class="kpi"><div class="num"><span id="${id}">0</span>${sfx}</div><div class="lbl">${label}</div></div>`;
+    const tally = (list, keyFn, valFn = () => 1) => { const o = {}; list.forEach(r => { const k = keyFn(r) || "-"; o[k] = (o[k] || 0) + Number(valFn(r) || 0); }); return o; };
+    const top = (o, n) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n);
+    let ME, charts = [], DATA = {};
+
+    (async () => {
+      const auth = await requireLogin(); if (!auth) return;
+      ME = auth.profile;
+      if (!canView(ME)) { location.href = "dashboard.html"; return; }
+      renderHeader(ME); translatePage();
+      Chart.defaults.font.family = "system-ui, 'Noto Sans Ethiopic', sans-serif";
+      $("aTo").value = todayStr(); $("aFrom").value = addDays(todayStr(), -29);
+      $("aFrom").onchange = $("aTo").onchange = load;
+      load();
+    })();
+
+    async function load() {
+      const from = $("aFrom").value, to = $("aTo").value;
+      if (!from || !to || from > to) return;
+      const [att, ship, spare, eng, pShip, pSpare] = await Promise.all([
+        db.from("attendance").select("user_id, day, status").gte("day", from).lte("day", to),
+        db.from("shipments").select("amount, sent_at, pay_source, status").gte("sent_at", from + "T00:00:00+03:00").lte("sent_at", to + "T23:59:59+03:00"),
+        db.from("spare_requests").select("*").gte("requested_at", from + "T00:00:00+03:00").lte("requested_at", to + "T23:59:59+03:00"),
+        db.from("profiles").select("id, full_name").eq("role", "engineer"),
+        db.from("shipments").select("*").eq("status", "sent").order("sent_at"),
+        db.from("spare_requests").select("*").eq("status", "pending").order("requested_at"),
+      ]);
+      const A = att.data || [], S = ship.data || [], R = spare.data || [];
+      const name = Object.fromEntries((eng.data || []).map(u => [u.id, u.full_name]));
+      DATA = { from, to, A, S, R, name, pShip: pShip.data || [], pSpare: pSpare.data || [] };
+
+      const c = s => A.filter(r => r.status === s).length;
+      const worked = c("ready") + c("late") + c("absent");
+      const rate = worked ? Math.round((c("ready") + c("late")) * 100 / worked) : 0;
+      const answered = R.filter(r => r.status !== "pending"), yes = R.filter(r => r.status === "approved").length;
+      $("kpis").innerHTML = kpi("k1", t("attRate"), "%") + kpi("k2", t("lateDays")) + kpi("k3", t("absentDays")) + kpi("k4", t("shipTotal")) + kpi("k5", t("spareReq")) + kpi("k6", t("spareYes"), "%");
+      [rate, c("late"), c("absent"), S.reduce((s, r) => s + Number(r.amount), 0), R.length, answered.length ? Math.round(yes * 100 / answered.length) : 0]
+        .forEach((v, i) => countUp($("k" + (i + 1)), v));
+
+      charts.forEach(x => x.destroy()); charts = [];
+      const mk = (id, cfg) => charts.push(new Chart($(id), { ...cfg, options: { responsive: true, maintainAspectRatio: false, ...(cfg.options || {}) } }));
+      const days = []; for (let d = from; d <= to && days.length < 92; d = addDays(d, 1)) days.push(d);
+      mk("c1", { type: "line", data: { labels: days.map(d => d.slice(5)), datasets: ["ready", "late", "absent"].map(s => ({ label: t("st_" + s), borderColor: COLORS[s], backgroundColor: COLORS[s], tension: .3, pointRadius: 2,
+        data: days.map(d => A.filter(r => r.day === d && r.status === s).length) })) }, options: { scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } } });
+      const byDay = tally(S, r => dayOf(r.sent_at), r => r.amount);
+      mk("c2", { type: "bar", data: { labels: days.map(d => d.slice(5)), datasets: [{ label: t("amount"), data: days.map(d => byDay[d] || 0), backgroundColor: "#5081bc", borderRadius: 4 }] }, options: { plugins: { legend: { display: false } } } });
+      const pay = tally(S, r => t("pay_" + (r.pay_source || "self")), r => r.amount);
+      mk("c3", { type: "doughnut", data: { labels: Object.keys(pay), datasets: [{ data: Object.values(pay), backgroundColor: PALETTE, borderWidth: 2 }] }, options: { cutout: "58%" } });
+      const bar = (id, pairs, color) => mk(id, { type: "bar", data: { labels: pairs.map(p => p[0]), datasets: [{ data: pairs.map(p => p[1]), backgroundColor: color, borderRadius: 4 }] },
+        options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } } });
+      bar("c4", top(tally(R, r => r.bank), 8), "#8e6ed8");
+      bar("c5", top(tally(R, r => r.item_type, r => r.quantity), 8), "#3bbfae");
+      bar("c6", top(tally(R, r => r.requester_name), 8), "#e58a3c");
+
+      const list = (rows, whoFn, textFn, tsFn) => rows.length ? rows.map(r => `<div class="note"><b>${esc(whoFn(r))}</b> · ${esc(textFn(r))} ${pendingBadge(tsFn(r))}</div>`).join("") : `<p class="muted">${t("noPending")}</p>`;
+      $("pShip").innerHTML = list(DATA.pShip, r => (r.sender_name || name[r.engineer_id] || "") + " → " + (r.receiver_name || ""), r => `${r.item_type} x ${r.quantity}`, r => r.sent_at);
+      $("pSpare").innerHTML = list(DATA.pSpare, r => r.requester_name + " → " + r.recipient_name, r => `${r.item_type} x ${r.quantity} (${r.bank} / ${r.branch})`, r => r.requested_at);
+    }
+
+    $("xlsBtn").onclick = () => {
+      const { A, S, R, name, from, to } = DATA, c = s => A.filter(r => r.status === s).length;
+      const answered = R.filter(r => r.status !== "pending");
+      const sum = [[t("fromDate"), from], [t("toDate"), to], [t("kpiPresent"), c("ready")], [t("kpiLate"), c("late")], [t("kpiAbsent"), c("absent")],
+        [t("totalAmount"), S.reduce((s, r) => s + Number(r.amount), 0)], [t("totalRequests"), R.length], [t("spareYes"), answered.length ? Math.round(R.filter(r => r.status === "approved").length * 100 / answered.length) + "%" : "0%"],
+        [t("pendingShip"), DATA.pShip.length], [t("pendingSpare"), DATA.pSpare.length]].map(([k, v]) => ({ [t("sheetSummary")]: k, [t("count")]: v }));
+      const perEng = Object.keys(name).map(id => { const m = A.filter(r => r.user_id === id); return { [t("engineer")]: name[id],
+        [t("st_ready")]: m.filter(r => r.status === "ready").length, [t("st_late")]: m.filter(r => r.status === "late").length, [t("st_absent")]: m.filter(r => r.status === "absent").length,
+        [t("spareReq")]: R.filter(r => r.requester_id === id).length }; });
+      const byDay = tally(S, r => dayOf(r.sent_at), r => r.amount), pay = tally(S, r => t("pay_" + (r.pay_source || "self")), r => r.amount);
+      const bank = tally(R, r => r.bank + " / " + r.branch), item = tally(R, r => r.item_type, r => r.quantity);
+      const rows = o => Object.entries(o).map(([k, v]) => ({ "": k, [t("count")]: v }));
+      const pend = [...DATA.pShip.map(r => ({ [t("sheetPending")]: t("shipments"), [t("engineer")]: r.sender_name || name[r.engineer_id] || "", [t("receiver")]: r.receiver_name || "", [t("itemType")]: r.item_type, [t("quantity")]: r.quantity, [t("dateTime")]: new Date(r.sent_at).toLocaleString("en-GB", { timeZone: TZ }) })),
+        ...DATA.pSpare.map(r => ({ [t("sheetPending")]: t("spare"), [t("engineer")]: r.requester_name, [t("receiver")]: r.recipient_name, [t("itemType")]: r.item_type, [t("quantity")]: r.quantity, [t("dateTime")]: new Date(r.requested_at).toLocaleString("en-GB", { timeZone: TZ }) }))];
+      const wb = XLSX.utils.book_new(), add = (d, n) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d), n);
+      add(sum, t("sheetSummary")); add(perEng, t("engineer")); add(rows(byDay), t("chartAmountDay").slice(0, 28)); add(rows(pay), t("paySource"));
+      add(rows(bank), t("sheetBank")); add(rows(item), t("sheetByItem")); add(pend, t("sheetPending"));
+      XLSX.writeFile(wb, `analysis-${from}_${to}.xlsx`);
+    };
+  </script>
+</body>
+</html>

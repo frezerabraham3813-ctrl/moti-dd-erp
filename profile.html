@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Profile - Moti DD ERP</title>
+  <link rel="icon" href="img/logo-small.jpg">
+  <meta name="theme-color" content="#3a68a3">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="header"></header>
+  <main>
+    <div class="card">
+      <div class="profile-head">
+        <div id="bigAvatar"></div>
+        <div>
+          <h2 id="pName" style="margin-bottom:4px"></h2>
+          <div id="pRole" class="muted"></div>
+          <p>
+            <input id="photoFile" type="file" accept="image/*" hidden>
+            <button id="photoBtn" class="secondary" data-t="choosePhoto"></button>
+            <button id="photoDel" class="secondary" data-t="removePhoto"></button>
+          </p>
+        </div>
+      </div>
+      <label for="empId" data-t="employeeId"></label>
+      <input id="empId" autocomplete="off">
+      <label for="themeSel" data-t="theme"></label>
+      <select id="themeSel"></select>
+      <p><button id="saveBtn" data-t="saveProfile"></button></p>
+      <div id="msg" class="msg"></div>
+    </div>
+
+    <div class="card" id="teamCard" hidden>
+      <h2 data-t="team"></h2>
+      <div class="team" id="team"></div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/i18n-round1.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const msg = (text, ok) => { $("msg").textContent = text || ""; $("msg").className = "msg" + (ok ? " ok" : ""); };
+    let ME, photo = null;          // photo: null = unchanged, "" = remove, otherwise new picture
+
+    (async () => {
+      const auth = await requireLogin(); if (!auth) return;
+      ME = auth.profile;
+      renderHeader(ME); translatePage();
+      $("themeSel").innerHTML = ["auto", "light", "dark"].map(v => `<option value="${v}">${t("theme" + v[0].toUpperCase() + v.slice(1))}</option>`).join("");
+      $("themeSel").value = localStorage.getItem("theme") || "auto";
+      $("pName").textContent = ME.full_name;
+      $("pRole").textContent = t(ME.role === "manager" ? "manager" : ME.role === "admin" ? "admin" : "engineer");
+      $("empId").value = ME.employee_id || "";
+      drawAvatar();
+      if (canView(ME)) { $("teamCard").hidden = false; loadTeam(); }
+    })();
+
+    function drawAvatar() {
+      const shown = photo === null ? ME.photo : photo;
+      $("bigAvatar").innerHTML = avatar({ full_name: ME.full_name, photo: shown }, "lg");
+    }
+
+    // Shrinks the picture to 256 x 256 so it stays small in the database
+    function shrink(file) {
+      return new Promise((res, rej) => {
+        const img = new Image();
+        img.onload = () => {
+          const S = 256, c = document.createElement("canvas"); c.width = c.height = S;
+          const k = Math.max(S / img.width, S / img.height), w = img.width * k, h = img.height * k;
+          c.getContext("2d").drawImage(img, (S - w) / 2, (S - h) / 2, w, h);
+          res(c.toDataURL("image/jpeg", 0.82));
+        };
+        img.onerror = rej; img.src = URL.createObjectURL(file);
+      });
+    }
+    $("photoBtn").onclick = () => $("photoFile").click();
+    $("photoFile").onchange = async () => {
+      const f = $("photoFile").files[0]; if (!f) return;
+      try { photo = await shrink(f); drawAvatar(); } catch { msg(t("error")); }
+    };
+    $("photoDel").onclick = () => { photo = ""; drawAvatar(); };
+
+    $("saveBtn").onclick = async () => {
+      msg("");
+      const { error } = await db.rpc("update_my_profile", { p_employee_id: $("empId").value, p_photo: photo });
+      if (error) return msg(t("error") + " " + error.message);
+      const want = $("themeSel").value;
+      msg(t("profileSaved"), true);
+      if (want !== (localStorage.getItem("theme") || "auto")) return THEME.set(want);   // reloads the page
+      setTimeout(() => location.reload(), 600);
+    };
+
+    // Manager / admin: everybody's card. Manager can set the ID number of each person.
+    async function loadTeam() {
+      const { data, error } = await db.rpc("list_profiles");
+      if (error) { $("team").innerHTML = `<p class="muted">${esc(error.message)}</p>`; return; }
+      $("team").innerHTML = data.map(u => `<div class="member">${avatar(u, "md")}<div style="flex:1"><b>${esc(u.full_name)}</b><br>
+        <small>${esc(t(u.role === "manager" ? "manager" : u.role === "admin" ? "admin" : "engineer"))} · ${u.employee_id ? esc(u.employee_id) : "—"}</small></div>
+        ${isManager(ME) ? `<button class="secondary" data-id="${u.id}" data-cur="${esc(u.employee_id || "")}">${t("setId")}</button>` : ""}</div>`).join("");
+    }
+    $("team").onclick = async e => {
+      const b = e.target.closest("button[data-id]"); if (!b) return;
+      const v = prompt(t("employeeId"), b.dataset.cur); if (v === null) return;
+      const { error } = await db.rpc("set_employee_id", { p_user: b.dataset.id, p_employee_id: v });
+      if (error) return alert(error.message);
+      loadTeam();
+    };
+  </script>
+</body>
+</html>
