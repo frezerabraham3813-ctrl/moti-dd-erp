@@ -201,12 +201,12 @@
       const { data } = await db.from("leave_requests").select("*, profiles(full_name)").order("created_at", { ascending: false }).limit(50);
       const rows = data || [];
       if (ADM) {
-        $("mgrLeaves").innerHTML = rows.length ? rows.map(r => `<div class="note"><b>${esc(r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}
+        $("mgrLeaves").innerHTML = rows.length ? rows.map(r => `<div class="note"><b>${personLink(r.user_id || r.engineer_id, r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}
           <span class="badge ${r.status}">${t("ls_" + r.status)}</span>${pendingOf(r)}<br>${esc(r.reason)}${r.manager_note ? `<br><i>${esc(r.manager_note)}</i>` : ""}</div>`).join("") : `<p>${t("noRequests")}</p>`;
       } else if (MGR) {
         const pend = rows.filter(r => r.status === "pending");
         $("mgrLeaves").innerHTML = pend.length ? pend.map(r => `<div class="note">
-          <b>${esc(r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}${pendingOf(r)}<br>${esc(r.reason)}
+          <b>${personLink(r.user_id || r.engineer_id, r.profiles?.full_name)}</b> · ${r.from_day} → ${r.to_day}${pendingOf(r)}<br>${esc(r.reason)}
           <input id="ln_${r.id}" placeholder="${esc(t("managerNote"))}">
           <p><button data-act="lv-ok" data-id="${r.id}">${t("approve")}</button>
           <button class="secondary" data-act="lv-no" data-id="${r.id}">${t("reject")}</button></p></div>`).join("")
@@ -229,7 +229,7 @@
       $("boardHead").innerHTML = "<tr>" + ["engineer", "status", "time", "reason", "approved", "actions"].map(c => `<th>${t(c)}</th>`).join("") + "</tr>";
       $("boardBody").innerHTML = people.map(u => {
         const r = dayRows.find(x => x.user_id === u.id);
-        return `<tr><td>${esc(u.full_name)}</td><td>${badge(r?.status)}</td><td>${timeCell(r)}</td>
+        return `<tr><td>${personLink(u.id, u.full_name)}</td><td>${badge(r?.status)}</td><td>${timeCell(r)}</td>
           <td>${esc(r?.reason)}</td><td>${r?.approved ? "✓" : ""}</td>
           <td>${MGR ? `<button class="secondary" data-act="edit" data-u="${u.id}">${t("edit")}</button>` +
             (r ? ` <button class="secondary" data-act="adel" data-u="${u.id}">${t("del")}</button>` : "") : ""}</td></tr>`;

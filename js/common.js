@@ -73,7 +73,16 @@ const HERO = { "dashboard.html": ["atm", "dashboard"], "shipments.html": ["part"
   "performance.html": ["atm", "performance"], "analysis.html": ["part", "analysis"], "profile.html": ["itm", "profile"] };
 
 // Top bar with menu, notifications, language switch and logout. Needs <header id="header"></header> in the page.
+// A person's name that opens their profile. Managers/admins: anyone. Engineers: only themselves.
+let CUR = null;
+function personLink(id, name) {
+  const n = esc(name || "");
+  if (!id || !CUR || !(canView(CUR) || id === CUR.id)) return n;
+  return `<a class="person" href="profile.html?id=${encodeURIComponent(id)}">${n}</a>`;
+}
+
 function renderHeader(profile) {
+  CUR = profile;
   const links = [["dashboard.html", "dashboard"], ["shipments.html", "shipments"], ["spare.html", "spareNav"], ["attendance.html", "attendance"], ["performance.html", "performance"]];
   if (canView(profile)) links.push(["analysis.html", "analysis"]);
   if (isManager(profile)) links.push(["users.html", "users"]);

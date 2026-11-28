@@ -11,7 +11,8 @@
 <body>
   <header id="header"></header>
   <main>
-    <div class="card">
+    <section id="personView" hidden></section>
+    <div class="card" id="meCard">
       <div class="profile-head">
         <div id="bigAvatar"></div>
         <div>
@@ -43,6 +44,7 @@
   <script src="js/i18n.js"></script>
   <script src="js/i18n-round1.js"></script>
   <script src="js/common.js"></script>
+  <script src="js/person.js"></script>
   <script>
     const $ = id => document.getElementById(id);
     const msg = (text, ok) => { $("msg").textContent = text || ""; $("msg").className = "msg" + (ok ? " ok" : ""); };
@@ -52,6 +54,9 @@
       const auth = await requireLogin(); if (!auth) return;
       ME = auth.profile;
       renderHeader(ME); translatePage();
+      // profile.html?id=... : managers / admins see that person's page
+      const viewId = new URLSearchParams(location.search).get("id");
+      if (viewId && viewId !== ME.id && canView(ME)) { document.body.classList.add("dash"); $("meCard").hidden = true; return showPerson(viewId); }
       $("themeSel").innerHTML = ["auto", "light", "dark"].map(v => `<option value="${v}">${t("theme" + v[0].toUpperCase() + v.slice(1))}</option>`).join("");
       $("themeSel").value = localStorage.getItem("theme") || "auto";
       $("pName").textContent = ME.full_name;
@@ -100,7 +105,7 @@
     async function loadTeam() {
       const { data, error } = await db.rpc("list_profiles");
       if (error) { $("team").innerHTML = `<p class="muted">${esc(error.message)}</p>`; return; }
-      $("team").innerHTML = data.map(u => `<div class="member">${avatar(u, "md")}<div style="flex:1"><b>${esc(u.full_name)}</b><br>
+      $("team").innerHTML = data.map(u => `<div class="member">${avatar(u, "md")}<div style="flex:1"><b>${personLink(u.id, u.full_name)}</b><br>
         <small>${esc(t(u.role === "manager" ? "manager" : u.role === "admin" ? "admin" : "engineer"))} · ${u.employee_id ? esc(u.employee_id) : "—"}</small></div>
         ${isManager(ME) ? `<button class="secondary" data-id="${u.id}" data-cur="${esc(u.employee_id || "")}">${t("setId")}</button>` : ""}</div>`).join("");
     }

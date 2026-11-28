@@ -151,7 +151,7 @@
         const timer = r.status === "received" ? "" : pendingBadge(r.sent_at);
         return `<tr>
           <td>${r.serial_no}</td><td>${esc(new Date(r.sent_at).toLocaleString(getLang() === "am" ? "am-ET" : "en-GB"))}</td>
-          <td>${esc(senderOf(r))}</td><td>${esc(r.receiver_name)}</td>
+          <td>${personLink(r.engineer_id, senderOf(r))}</td><td>${personLink(r.receiver_id, r.receiver_name)}</td>
           <td>${esc(r.from_place)}</td><td>${esc(r.to_place)}</td><td>${esc(r.item_type)}</td><td>${r.quantity}</td>
           <td>${fmt(r.amount)}</td><td>${esc(payLabel(r))}</td><td>${esc(r.plate_no)}</td><td>${esc(r.voucher_no)}</td>
           <td><span class="badge ${r.status}">${statusLabel(r)}</span>${timer}</td>${ADMIN ? "" : `<td>${buttons.join("")}</td>`}</tr>`;

@@ -78,7 +78,7 @@
     function render() {
       $("thead").innerHTML = "<tr>" + ["username", "fullName", "role", "active", "actions"].map(c => `<th>${t(c)}</th>`).join("") + "</tr>";
       $("tbody").innerHTML = people.map(u => `<tr>
-        <td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${t(u.role)}</td><td>${u.active ? t("yes") : t("no")}</td>
+        <td>${esc(u.username)}</td><td>${personLink(u.id, u.full_name)}</td><td>${t(u.role)}</td><td>${u.active ? t("yes") : t("no")}</td>
         <td><button data-act="pw" data-u="${esc(u.username)}">${t("setPassword")}</button>
         ${u.id !== ME.id ? `<button class="secondary" data-act="toggle" data-id="${u.id}">${u.active ? t("deactivate") : t("activate")}</button>` : ""}</td></tr>`).join("");
 

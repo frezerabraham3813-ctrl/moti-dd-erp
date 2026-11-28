@@ -224,3 +224,17 @@ details[open] > summary::before { transform: rotate(90deg); }
 [data-theme=dark] .chip.warn { background: #3d3112; color: #ffd98a; } [data-theme=dark] .chip.info { background: #2d2650; color: #d9ccff; }
 [data-theme=dark] .adj-row { background: #1d2b3f; }
 [data-theme=dark] .rk .sc b { color: #8be3b5; } [data-theme=dark] .rk .sc.mid b { color: #ffd98a; } [data-theme=dark] .rk .sc.low b { color: #ffb4b4; }
+
+/* ===== Person page (profile.html?id=...) and name links ===== */
+a.person { color: inherit; text-decoration: none; border-bottom: 1px dashed currentColor; }
+a.person:hover { color: var(--main); border-bottom-style: solid; }
+.person-head { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.person-head h2 { margin: 0 0 4px; } .person-head p { margin: 8px 0 0; } .person-head > div:nth-child(2) { flex: 1; min-width: 180px; }
+.person-score { text-align: right; min-width: 140px; }
+.person-score b { display: block; font-size: 2.4rem; line-height: 1; color: #17784a; margin: 2px 0; }
+.person-score.mid b { color: #a86d00; } .person-score.low b { color: #c0392b; }
+.person-score small { color: var(--muted); display: block; }
+.person-score .scorebar { margin-top: 6px; }
+#personView .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 640px) { .person-head { text-align: left; } .person-score { text-align: left; width: 100%; } }
+[data-theme=dark] .person-score b { color: #8be3b5; } [data-theme=dark] .person-score.mid b { color: #ffd98a; } [data-theme=dark] .person-score.low b { color: #ffb4b4; }

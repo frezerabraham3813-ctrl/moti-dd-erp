@@ -113,7 +113,7 @@
         const req = (s.data || []).filter(r => r.requester_id === u.id).length, extra = Math.max(0, req - allowed);
         const adjPts = adjRows.filter(r => r.engineer_id === u.id).reduce((x, r) => x + Number(r.points), 0);
         const score = Math.max(0, Math.min(100, 100 - 5 * absent - 2 * late - 2 * extra + adjPts));
-        return { name: u.full_name, absent, late, mins, req, extra, adjPts, score };
+        return { id: u.id, name: u.full_name, absent, late, mins, req, extra, adjPts, score };
       }).sort((x, y) => y.score - x.score);
       render();
     }
@@ -134,13 +134,13 @@
           r.req && !r.extra && chip(t("spareN", { n: r.req })),
           r.adjPts && chip(t("manualN", { n: (r.adjPts > 0 ? "+" : "") + r.adjPts }), r.adjPts > 0 ? "ok" : "bad")].filter(Boolean);
         return `<li class="rk${i < 3 ? " top" : ""}"><span class="pos">${medal(i)}</span>
-          <div class="who-col"><b>${esc(r.name)}</b><div class="chips">${chips.join("") || chip("✓ " + t("noProblems"), "ok")}</div></div>
+          <div class="who-col"><b>${personLink(r.id, r.name)}</b><div class="chips">${chips.join("") || chip("✓ " + t("noProblems"), "ok")}</div></div>
           <div class="sc ${cls(r.score)}"><b>${r.score.toFixed(0)}%</b><small>${esc(label(r.score))}</small><div class="scorebar ${cls(r.score)}"><i style="width:${r.score}%"></i></div></div></li>`;
       }).join("") : `<li class="empty">${t("noData")}</li>`;
       $("aEng").innerHTML = people.map(u => `<option value="${u.id}">${esc(u.full_name)}</option>`).join("");
       const name = Object.fromEntries(people.map(u => [u.id, u.full_name]));
       $("adjBody").innerHTML = adjRows.length ? adjRows.map(r => `<div class="adj-row"><span class="pts ${r.points > 0 ? "plus" : "minus"}">${r.points > 0 ? "+" : ""}${r.points}</span>
-        <div><b>${esc(name[r.engineer_id] || "")}</b><small>${esc(r.reason)} · ${esc(nice(r.adjustment_date))}</small></div>
+        <div><b>${personLink(r.engineer_id, name[r.engineer_id])}</b><small>${esc(r.reason)} · ${esc(nice(r.adjustment_date))}</small></div>
         ${MGR ? `<button class="secondary" data-del="${r.id}" aria-label="${esc(t("del"))}">✕</button>` : ""}</div>`).join("")
         : `<p class="muted">${ADJ_OK ? t("noAdj") : t("perfNeedsSql")}</p>`;
     }

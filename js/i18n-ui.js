@@ -1,5 +1,8 @@
 // Words for the new dashboard and the phone top bar. Loaded by js/common.js. Edit words here.
 Object.assign(TEXT.en, {
+  scoreThisWeek: "Score this week", seeRanking: "See full ranking", attMonth: "Attendance this month", lateMinTotal: "{n} min late in total",
+  workMonth: "Work this month", shipSentN: "Shipments sent", shipRecvN: "Shipments received", shipAmount: "Amount sent (birr)", spareMadeN: "Spare requests made",
+  recentDays: "Last days", noRecord: "No record", personNotFound: "This person was not found.", backTeam: "Back to team",
   ranking: "Ranking", howScore: "How the score works", ruleStart: "Everyone starts at 100%", ruleAbsent: "Absent day −5", ruleLate: "Late day −2",
   ruleExtra: "Each spare request over {n} per week −2", ruleManual: "Manager can add or take points",
   noProblems: "No problems", absentN: "{n} absent", lateN: "{n} late ({m} min)", spareN: "{n} spare requests", extraN: "{n} over limit", manualN: "{n} manual",
@@ -12,6 +15,9 @@ Object.assign(TEXT.en, {
   thisMonth: "This month", myShipments: "My shipments", forMe: "Waiting for me to receive",
 });
 Object.assign(TEXT.am, {
+  scoreThisWeek: "የዚህ ሳምንት ነጥብ", seeRanking: "ሙሉ ደረጃውን ይመልከቱ", attMonth: "የዚህ ወር ክትትል", lateMinTotal: "በአጠቃላይ {n} ደቂቃ ያረፈዱ",
+  workMonth: "የዚህ ወር ሥራ", shipSentN: "የላኳቸው እቃዎች", shipRecvN: "የተቀበሏቸው እቃዎች", shipAmount: "የተላከ ገንዘብ (ብር)", spareMadeN: "የጠየቋቸው ስፔሮች",
+  recentDays: "ያለፉት ቀናት", noRecord: "መዝገብ የለም", personNotFound: "ሰውየው አልተገኘም።", backTeam: "ወደ ቡድኑ ተመለስ",
   ranking: "ደረጃ", howScore: "ነጥቡ እንዴት ይሰላል", ruleStart: "ሁሉም በ100% ይጀምራል", ruleAbsent: "የቀሩበት ቀን −5", ruleLate: "ያረፈዱበት ቀን −2",
   ruleExtra: "በሳምንት ከ{n} በላይ ለእያንዳንዱ የስፔር ጥያቄ −2", ruleManual: "ማናጀሩ ነጥብ መጨመር ወይም መቀነስ ይችላል",
   noProblems: "ምንም ችግር የለም", absentN: "{n} ቀሪ", lateN: "{n} ማርፈድ ({m} ደቂቃ)", spareN: "{n} የስፔር ጥያቄ", extraN: "{n} ከገደብ በላይ", manualN: "{n} በእጅ",

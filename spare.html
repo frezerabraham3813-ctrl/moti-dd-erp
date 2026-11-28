@@ -110,7 +110,7 @@
         }
         if (MGR) b.push(`<button class="secondary" data-act="edit" data-id="${r.id}">${t("edit")}</button>`, `<button class="secondary" data-act="del" data-id="${r.id}">${t("del")}</button>`);
         const timer = r.status === "pending" ? pendingBadge(r.requested_at) : "";   // counts from the time it was requested
-        return `<tr><td>${r.serial_no}</td><td>${esc(when(r.requested_at))}</td><td>${esc(r.requester_name)}</td><td>${esc(r.recipient_name)}</td>
+        return `<tr><td>${r.serial_no}</td><td>${esc(when(r.requested_at))}</td><td>${personLink(r.requester_id, r.requester_name)}</td><td>${personLink(r.recipient_id, r.recipient_name)}</td>
           <td>${esc(r.bank)}</td><td>${esc(r.branch)}</td><td>${esc(r.item_type)}</td><td>${r.quantity}</td>
           <td><span class="badge ${r.status}">${t("sp_" + r.status)}</span>${timer}${r.response_note ? `<br><small>${esc(r.response_note)}</small>` : ""}</td>
           ${ADMIN ? "" : `<td>${b.join(" ")}</td>`}</tr>`;
