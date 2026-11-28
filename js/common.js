@@ -35,7 +35,7 @@ function countUp(el, to, ms = 900) {
 
 // Top bar with menu, notifications, language switch and logout. Needs <header id="header"></header> in the page.
 function renderHeader(profile) {
-  const links = [["dashboard.html", "dashboard"], ["shipments.html", "shipments"], ["attendance.html", "attendance"]];
+  const links = [["dashboard.html", "dashboard"], ["shipments.html", "shipments"], ["spare.html", "spareNav"], ["attendance.html", "attendance"]];
   if (isManager(profile)) links.push(["users.html", "users"]);
   const page = location.pathname.split("/").pop() || "index.html";
   document.getElementById("header").innerHTML = `
